@@ -1,0 +1,634 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum SourceType {
+  WEB_MOBILE_UPLOAD
+  WEB_DESKTOP_UPLOAD
+  DEVICE_IMPORT
+  MANUAL_IMPORT
+}
+
+enum BatchStatus {
+  UPLOADING
+  PROCESSING
+  NEEDS_REVIEW
+  IMPORTED
+  PARTIAL_FAILED
+  FAILED
+}
+
+enum AssetType {
+  ACCOUNT_MATERIAL
+  PRODUCT_MATERIAL
+  REFERENCE_VIDEO
+  PUBLIC_RESOURCE
+  UNKNOWN
+}
+
+enum ShooterStatus {
+  ACTIVE
+  DISABLED
+  DELETED
+}
+
+enum CategoryStatus {
+  ACTIVE
+  DISABLED
+  DELETED
+}
+
+enum MaterialStatus {
+  UPLOADED
+  PROCESSING
+  AI_TAGGED
+  NEEDS_REVIEW
+  IMPORTED
+  READY
+  TRASHED
+  REJECTED
+  FAILED
+}
+
+enum IngestionJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum OperationType {
+  UPLOAD
+  AI_CLASSIFY
+  RENAME
+  MOVE
+  EDIT_TAGS
+  DELETE_TO_TRASH
+  RESTORE
+  DOWNLOAD
+  REANALYZE
+  ADD_TO_PACKAGE
+}
+
+enum ConfigStatus {
+  ACTIVE
+  DISABLED
+  DELETED
+}
+
+enum StorageProviderType {
+  LOCAL
+  NAS
+  EXTERNAL_DRIVE
+  S3_COMPATIBLE
+  OTHER
+}
+
+enum StorageProviderStatus {
+  ACTIVE
+  DISABLED
+  DELETED
+}
+
+enum DerivativeFileType {
+  THUMBNAIL
+  PREVIEW_MP4
+  PROXY_MP4
+  AI_FRAME
+  AUDIO
+  SUBTITLE
+  METADATA_JSON
+  OTHER
+}
+
+enum DerivativeFileStatus {
+  QUEUED
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+enum AIProviderType {
+  MOCK
+  VOLCENGINE
+  OPENAI
+  TONGYI
+  GEMINI
+  LOCAL_OLLAMA
+  LOCAL_OPENAI_COMPATIBLE
+  OTHER
+}
+
+enum AIAnalysisJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+model Workspace {
+  id                    String             @id @default(cuid())
+  code                  String             @unique
+  name                  String
+  storageRoot           String?
+  defaultStorageProviderId String?
+  defaultStorageProvider   StorageProvider? @relation("WorkspaceDefaultStorageProvider", fields: [defaultStorageProviderId], references: [id])
+  themePresetId         String?
+  themePreset           ThemePreset?       @relation(fields: [themePresetId], references: [id])
+  menuConfigId          String?
+  menuConfig            MenuConfig?        @relation(fields: [menuConfigId], references: [id])
+  terminologyPackId     String?
+  terminologyPack       TerminologyPack?   @relation(fields: [terminologyPackId], references: [id])
+  industryTemplateId    String?
+  industryTemplate      IndustryTemplate?  @relation(fields: [industryTemplateId], references: [id])
+  status                ConfigStatus       @default(ACTIVE)
+  notes                 String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  storageProviders      StorageProvider[]  @relation("WorkspaceStorageProviders")
+  categories            Category[]
+  materials             Material[]
+  shooters              Shooter[]
+  importBatches         ImportBatch[]
+  ingestionJobs         IngestionJob[]
+  derivativeFiles       DerivativeFile[]
+  aiAnalysisJobs        AIAnalysisJob[]
+  aiProviderConfigs     AIProviderConfig[]
+
+  @@index([status])
+  @@index([defaultStorageProviderId])
+  @@index([themePresetId])
+  @@index([menuConfigId])
+  @@index([terminologyPackId])
+  @@index([industryTemplateId])
+}
+
+model AIProviderConfig {
+  id                    String       @id @default(cuid())
+  workspaceId           String?
+  workspace             Workspace?   @relation(fields: [workspaceId], references: [id])
+  name                  String
+  provider              String       @default("mock")
+  model                 String?
+  baseUrl               String?
+  openaiApiKey          String?
+  arkApiKey             String?
+  volcengineBaseUrl     String?
+  localBaseUrl          String?
+  localApiKey           String?
+  localModel            String?
+  localHealthcheckUrl   String?
+  fallbackProvider      String       @default("mock")
+  frameMax              Int          @default(5)
+  imageDetail           String       @default("low")
+  requestTimeoutMs      Int          @default(60000)
+  openaiProxyUrl        String?
+  volcengineProxyUrl    String?
+  isActive              Boolean      @default(false)
+  status                ConfigStatus @default(ACTIVE)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([isActive])
+  @@index([provider])
+}
+
+model StorageProvider {
+  id                 String                @id @default(cuid())
+  workspaceId        String?
+  workspace          Workspace?            @relation("WorkspaceStorageProviders", fields: [workspaceId], references: [id])
+  code               String                @unique
+  name               String
+  type               StorageProviderType   @default(LOCAL)
+  rootPath           String?
+  baseUrl            String?
+  config             Json?
+  status             StorageProviderStatus @default(ACTIVE)
+  notes              String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  defaultForWorkspaces Workspace[]          @relation("WorkspaceDefaultStorageProvider")
+  categories         Category[]
+  materials          Material[]
+  derivativeFiles    DerivativeFile[]
+
+  @@index([workspaceId])
+  @@index([type])
+  @@index([status])
+}
+
+model NamingTemplate {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  name        String
+  pattern     String?
+  description String?
+  status      ConfigStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  categories  Category[]
+  materials   Material[]
+
+  @@index([status])
+}
+
+model MetadataSchema {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  name        String
+  schemaJson  Json?
+  description String?
+  status      ConfigStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  categories  Category[]
+  materials   Material[]
+
+  @@index([status])
+}
+
+model ThemePreset {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  name        String
+  config      Json?
+  status      ConfigStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  workspaces  Workspace[]
+
+  @@index([status])
+}
+
+model MenuConfig {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  name        String
+  config      Json?
+  status      ConfigStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  workspaces  Workspace[]
+
+  @@index([status])
+}
+
+model TerminologyPack {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  name        String
+  terms       Json?
+  status      ConfigStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  workspaces  Workspace[]
+
+  @@index([status])
+}
+
+model IndustryTemplate {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  name        String
+  description String?
+  config      Json?
+  status      ConfigStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  workspaces  Workspace[]
+
+  @@index([status])
+}
+
+model ImportBatch {
+  id           String       @id @default(cuid())
+  workspaceId  String?
+  workspace    Workspace?   @relation(fields: [workspaceId], references: [id])
+  batchId      String       @unique
+  sourceType   SourceType
+  uploaderName String?
+  fileCount    Int
+  totalSize    Int
+  status       BatchStatus  @default(UPLOADING)
+  notes        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  materials    Material[]
+  jobs         IngestionJob[]
+
+  @@index([workspaceId])
+}
+
+model Shooter {
+  id          String        @id @default(cuid())
+  workspaceId String?
+  workspace   Workspace?    @relation(fields: [workspaceId], references: [id])
+  name        String        @unique
+  displayName String
+  status      ShooterStatus @default(ACTIVE)
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  materials   Material[]
+
+  @@index([workspaceId])
+  @@index([status])
+}
+
+model Category {
+  id                String         @id @default(cuid())
+  workspaceId       String?
+  workspace         Workspace?     @relation(fields: [workspaceId], references: [id])
+  storageProviderId String?
+  storageProvider   StorageProvider? @relation(fields: [storageProviderId], references: [id])
+  namingTemplateId  String?
+  namingTemplate    NamingTemplate? @relation(fields: [namingTemplateId], references: [id])
+  metadataSchemaId  String?
+  metadataSchema    MetadataSchema? @relation(fields: [metadataSchemaId], references: [id])
+  code              String         @unique
+  name              String
+  assetType         AssetType
+  parentId          String?
+  parent            Category?      @relation("CategoryTree", fields: [parentId], references: [id])
+  children          Category[]     @relation("CategoryTree")
+  directoryName     String?
+  storagePath       String?
+  relativePath      String?
+  physicalDirectory String?
+  level             Int?
+  sortOrder         Int            @default(0)
+  depth             Int            @default(1)
+  aiDescription     String?
+  status            CategoryStatus @default(ACTIVE)
+  isSystem          Boolean        @default(false)
+  allowUpload       Boolean        @default(true)
+  notes             String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  directoryLogs     DirectoryOperationLog[]
+  materials         Material[]     @relation("MaterialCategory")
+  userSelectedMaterials Material[] @relation("MaterialUserSelectedCategory")
+  aiSuggestedMaterials  Material[] @relation("MaterialAiSuggestedCategory")
+  finalMaterials        Material[] @relation("MaterialFinalCategory")
+
+  @@index([workspaceId])
+  @@index([storageProviderId])
+  @@index([namingTemplateId])
+  @@index([metadataSchemaId])
+  @@index([assetType])
+  @@index([parentId])
+  @@index([status])
+  @@index([allowUpload])
+  @@index([storagePath])
+}
+
+model DirectoryOperationLog {
+  id                    String   @id @default(cuid())
+  categoryId            String?
+  category              Category? @relation(fields: [categoryId], references: [id])
+  operationType         String
+  operatorName          String?
+  beforePath            String?
+  afterPath             String?
+  affectedMaterialCount Int      @default(0)
+  notes                 String?
+  createdAt             DateTime @default(now())
+
+  @@index([categoryId])
+  @@index([operationType])
+}
+
+model Material {
+  id                String         @id @default(cuid())
+  workspaceId       String?
+  workspace         Workspace?      @relation(fields: [workspaceId], references: [id])
+  storageProviderId String?
+  storageProvider   StorageProvider? @relation(fields: [storageProviderId], references: [id])
+  categoryId        String?
+  category          Category?       @relation("MaterialCategory", fields: [categoryId], references: [id])
+  userSelectedCategoryId String?
+  userSelectedCategory   Category?  @relation("MaterialUserSelectedCategory", fields: [userSelectedCategoryId], references: [id])
+  aiSuggestedCategoryId  String?
+  aiSuggestedCategory    Category?  @relation("MaterialAiSuggestedCategory", fields: [aiSuggestedCategoryId], references: [id])
+  finalCategoryId        String?
+  finalCategory          Category?  @relation("MaterialFinalCategory", fields: [finalCategoryId], references: [id])
+  namingTemplateId       String?
+  namingTemplate         NamingTemplate? @relation(fields: [namingTemplateId], references: [id])
+  metadataSchemaId       String?
+  metadataSchema         MetadataSchema? @relation(fields: [metadataSchemaId], references: [id])
+  materialId        String         @unique
+  batchId           String?
+  batch             ImportBatch?   @relation(fields: [batchId], references: [batchId])
+  assetType         AssetType
+  ingestSource      SourceType
+  originalFileName  String
+  storedFileName    String
+  originalPath      String
+  relativePath      String
+  absolutePath      String
+  thumbnailPath     String?
+  fileSize          Int
+  mimeType          String?
+  duration          Float?
+  width             Int?
+  height            Int?
+  orientation       String?
+  checksum          String
+  shooterId         String?
+  shooter           Shooter?       @relation(fields: [shooterId], references: [id])
+  shooterName       String?
+  uploaderName      String?
+  categoryPath            String?
+  categoryName            String?
+  userSelectedRootCategory String?
+  userSelectedSubCategory  String?
+  finalRootCategory        String?
+  finalSubCategory         String?
+  aiSuggestedRootCategory  String?
+  aiSuggestedSubCategory   String?
+  classificationConflict   Boolean        @default(false)
+  customTags               Json?
+  aiEmotionTags            Json?
+  aiUsageTags              Json?
+  aiSceneTags              Json?
+  aiSubjectTags            Json?
+  aiActionTags             Json?
+  conflictReason           String?
+  subjectType              String?
+  visualTags               Json?
+  contentIntent            String?
+  contentLongevity         String?
+  topicName                String?
+  topicSuggestion          String?
+  searchText               String?
+  primaryCategory   String
+  subject           String?
+  scene             String?
+  action            String?
+  usage             String?
+  aiResult          Json?
+  aiSummary         String?
+  aiConfidence      Float?
+  humanTags         Json?
+  humanConfirmed    Boolean        @default(false)
+  needsHumanReview  Boolean        @default(false)
+  status            MaterialStatus @default(UPLOADED)
+  notes             String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  operationLogs     FileOperationLog[]
+  derivativeFiles   DerivativeFile[]
+  aiAnalysisJobs    AIAnalysisJob[]
+
+  @@index([workspaceId])
+  @@index([storageProviderId])
+  @@index([categoryId])
+  @@index([userSelectedCategoryId])
+  @@index([aiSuggestedCategoryId])
+  @@index([finalCategoryId])
+  @@index([namingTemplateId])
+  @@index([metadataSchemaId])
+  @@index([batchId])
+  @@index([assetType])
+  @@index([shooterId])
+  @@index([status])
+  @@index([primaryCategory])
+  @@index([categoryPath])
+  @@index([classificationConflict])
+  @@index([subjectType])
+  @@index([contentIntent])
+  @@index([contentLongevity])
+  @@index([topicName])
+}
+
+model IngestionJob {
+  id                   String             @id @default(cuid())
+  workspaceId          String?
+  workspace            Workspace?         @relation(fields: [workspaceId], references: [id])
+  batchId              String
+  batch                ImportBatch        @relation(fields: [batchId], references: [batchId])
+  sourceType           SourceType
+  incomingRelativePath String
+  originalFileName     String
+  fileSize             Int
+  mimeType             String?
+  uploaderName         String?
+  shooterId            String?
+  shooterName          String?
+  categoryId           String?
+  userSelectedCategoryId String?
+  rootCategory         String?
+  subCategory          String?
+  customTags           Json?
+  notes                String?
+  manualAssetType      String?
+  status               IngestionJobStatus @default(QUEUED)
+  materialId           String?
+  attempts             Int                @default(0)
+  lastError            String?
+  lockedAt             DateTime?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([workspaceId])
+  @@index([batchId])
+  @@index([categoryId])
+  @@index([userSelectedCategoryId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model DerivativeFile {
+  id                String               @id @default(cuid())
+  workspaceId       String?
+  workspace         Workspace?           @relation(fields: [workspaceId], references: [id])
+  storageProviderId String?
+  storageProvider   StorageProvider?     @relation(fields: [storageProviderId], references: [id])
+  materialId        String
+  material          Material             @relation(fields: [materialId], references: [materialId])
+  type              DerivativeFileType
+  status            DerivativeFileStatus @default(QUEUED)
+  relativePath      String
+  absolutePath      String?
+  fileName          String?
+  mimeType          String?
+  fileSize          Int?
+  width             Int?
+  height            Int?
+  duration          Float?
+  frameIndex        Int?
+  timecodeMs        Int?
+  checksum          String?
+  metadata          Json?
+  errorMessage      String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([workspaceId])
+  @@index([storageProviderId])
+  @@index([materialId])
+  @@index([type])
+  @@index([status])
+  @@index([relativePath])
+}
+
+model AIAnalysisJob {
+  id                   String              @id @default(cuid())
+  workspaceId          String?
+  workspace            Workspace?          @relation(fields: [workspaceId], references: [id])
+  materialId           String?
+  material             Material?           @relation(fields: [materialId], references: [materialId])
+  providerType         AIProviderType      @default(MOCK)
+  providerName         String?
+  modelName            String?
+  status               AIAnalysisJobStatus @default(QUEUED)
+  inputFramePaths      Json?
+  inputMetadata        Json?
+  outputResult         Json?
+  fallbackProviderType AIProviderType?
+  usedFallback         Boolean             @default(false)
+  confidence           Float?
+  promptTokens         Int?
+  completionTokens     Int?
+  durationMs           Int?
+  errorCode            String?
+  errorMessage         String?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@index([workspaceId])
+  @@index([materialId])
+  @@index([providerType])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model FileOperationLog {
+  id             String        @id @default(cuid())
+  materialId     String
+  material       Material      @relation(fields: [materialId], references: [materialId])
+  operationType  OperationType
+  operatorName   String?
+  beforeFileName String?
+  afterFileName  String?
+  beforePath     String?
+  afterPath      String?
+  notes          String?
+  createdAt      DateTime      @default(now())
+
+  @@index([materialId])
+  @@index([operationType])
+}

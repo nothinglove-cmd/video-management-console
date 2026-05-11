@@ -1,0 +1,65 @@
+# System files
+.DS_Store
+
+# Dependencies
+node_modules/
+**/node_modules/
+.npm-cache/
+**/.npm-cache/
+
+# Build outputs
+.next/
+**/.next/
+dist/
+**/dist/
+build/
+**/build/
+coverage/
+**/coverage/
+
+# Local env and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# TypeScript
+tsconfig.tsbuildinfo
+**/tsconfig.tsbuildinfo
+
+# Prisma / SQLite local data
+dev.db
+dev.db-journal
+*.db
+*.db-journal
+*.db.backup*
+*.db.*backup*
+prisma/dev.db
+prisma/dev.db-journal
+prisma/dev.db.backup*
+video-ingestion-mvp/prisma/dev.db
+video-ingestion-mvp/prisma/dev.db-journal
+video-ingestion-mvp/prisma/dev.db.backup*
+
+# Local media and archives
+*.mp4
+*.mov
+*.m4v
+*.avi
+*.mkv
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
+# Private planning and handoff documents
+AI素材入库系统_研发资料/
+AI素材入库系统_研发资料_v2/
+AI素材入库系统_商业版蓝图/
+文档入口说明.md
+video-ingestion-mvp/docs/
+video-ingestion-mvp/接手对话/

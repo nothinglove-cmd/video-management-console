@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 20% 97%;
+  --foreground: 220 32% 12%;
+  --muted: 210 22% 94%;
+  --muted-foreground: 218 12% 45%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 32% 12%;
+  --border: 214 20% 88%;
+  --primary: 172 72% 25%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 174 62% 42%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 7 72% 52%;
+  --destructive-foreground: 0 0% 100%;
+  --ring: 172 72% 25%;
+  --font-sans: "Inter", "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei";
+  --skin-page-bg: #f5f7f8;
+  --skin-panel-bg: #ffffff;
+  --skin-header-bg: #ffffff;
+  --skin-border: #e2e8f0;
+  --skin-sidebar-bg: #053f39;
+  --skin-sidebar-active: rgba(20, 184, 166, 0.24);
+  --skin-sidebar-collapsed-width: 64px;
+  --skin-sidebar-expanded-width: 240px;
+  --skin-header-height: 64px;
+  --skin-header-height-mobile: 52px;
+  --skin-content-max-width: 1680px;
+  --skin-content-inset-desktop: 24px;
+  --skin-upload-aside-width: 320px;
+  --skin-library-sidebar-width: 232px;
+  --skin-library-sidebar-collapsed-width: 58px;
+  --skin-mobile-drawer-width: 86vw;
+  --skin-mobile-drawer-max-width: 320px;
+  --skin-modal-width-sm: 420px;
+  --skin-modal-width-md: 560px;
+  --skin-modal-width-lg: 1100px;
+  --skin-toolbar-min-height: 44px;
+  --skin-mobile-bottom-bar-height: 56px;
+  --skin-thumbnail-height-sm: 6rem;
+  --skin-thumbnail-height-md: 9rem;
+  --skin-thumbnail-height-lg: 11rem;
+  --skin-empty-state-min-height: 14rem;
+  --skin-upload-dropzone-min-height: 17.5rem;
+  --skin-radius-control: 8px;
+  --skin-radius-panel: 10px;
+  --skin-radius-card: 10px;
+  --skin-radius-sm: 6px;
+  --skin-surface-subtle: #f1f5f9;
+  --skin-surface-table-header: #f8fafc;
+  --skin-media-thumbnail-bg: #f1f5f9;
+  --skin-media-placeholder-bg: #f8fafc;
+  --skin-media-placeholder-border: #e2e8f0;
+  --skin-media-placeholder-icon: #94a3b8;
+  --skin-touch-target-min-height: 2.5rem;
+  --skin-shadow-panel: 0 2px 8px rgba(16, 24, 40, 0.04);
+  --skin-shadow-card: 0 1px 3px rgba(15, 23, 42, 0.06);
+  --skin-shadow-elevated: 0 16px 36px rgba(15, 23, 42, 0.14);
+  --skin-shadow-sticky-action: 0 -8px 24px rgba(15, 23, 42, 0.06);
+  --skin-text-page-title: 24px;
+  --skin-text-page-title-desktop: 28px;
+  --skin-leading-page-title: 1.18;
+  --skin-text-page-description: 14px;
+  --skin-leading-page-description: 1.6;
+  --skin-text-section-title: 15px;
+  --skin-leading-section-title: 1.4;
+  --skin-text-panel-title: 18px;
+  --skin-leading-panel-title: 1.35;
+  --skin-text-card-title: 13px;
+  --skin-leading-card-title: 18px;
+  --skin-text-body: 14px;
+  --skin-leading-body: 1.55;
+  --skin-text-body-dense: 13px;
+  --skin-leading-body-dense: 18px;
+  --skin-text-label: 12px;
+  --skin-leading-label: 16px;
+  --skin-text-value: 13px;
+  --skin-leading-value: 18px;
+  --skin-text-meta: 12px;
+  --skin-leading-meta: 17px;
+  --skin-text-path: 12px;
+  --skin-leading-path: 17px;
+  --skin-text-technical: 12px;
+  --skin-leading-technical: 16px;
+  --skin-text-table-head: 12px;
+  --skin-leading-table-head: 16px;
+  --skin-text-table-cell: 13px;
+  --skin-leading-table-cell: 18px;
+  --skin-text-badge: 12px;
+  --skin-leading-badge: 16px;
+  --skin-text-button: 14px;
+  --skin-leading-button: 20px;
+  --skin-text-input: 14px;
+  --skin-leading-input: 20px;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  min-height: 100vh;
+  color: hsl(var(--foreground));
+  background: var(--skin-page-bg);
+  overflow-x: hidden;
+}
+
+::selection {
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+}
+
+.page-shell {
+  width: min(1280px, calc(100vw - 32px));
+  margin: 0 auto;
+}
+
+.glass-card {
+  background: #ffffff;
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.04);
+}
+
+.animate-rise {
+  animation: rise 0.5s ease-out both;
+}
+
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

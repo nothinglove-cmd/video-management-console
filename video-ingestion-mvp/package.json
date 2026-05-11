@@ -1,0 +1,46 @@
+{
+  "name": "video-ingestion-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "check:env": "sucrase-node scripts/check-env.ts",
+    "backup:db": "sucrase-node scripts/backup-db.ts",
+    "cleanup:e2e:dry-run": "sucrase-node scripts/cleanup-e2e-artifacts.ts --dry-run",
+    "cleanup:e2e": "sucrase-node scripts/cleanup-e2e-artifacts.ts --execute --confirm DELETE_E2E_ARTIFACTS",
+    "init:workspace": "sucrase-node scripts/init-workspace.ts",
+    "backfill:workspace": "sucrase-node scripts/backfill-default-workspace.ts",
+    "db:push": "prisma db push",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.9.0",
+    "@radix-ui/react-slot": "^1.2.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "next": "^15.3.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sharp": "^0.34.5",
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "prisma": "^6.9.0",
+    "sucrase": "^3.35.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3"
+  }
+}
