@@ -3,6 +3,7 @@ export type StorageAuditIssueGroup =
   | "METADATA_JSON"
   | "DERIVATIVE_FILE"
   | "AI_FRAME_INPUT"
+  | "PROCESSING_TEMP_FILE"
   | "CATEGORY_DIRECTORY"
   | "INGESTION_JOB_SOURCE";
 

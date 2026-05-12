@@ -1,7 +1,9 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
 import { AiProviderConfigPanel } from "@/components/settings/ai-provider-config-panel";
+import { CategoryDirectorySyncPanel } from "@/components/settings/category-directory-sync-panel";
 import { RepairPanel } from "@/components/settings/repair-panel";
+import { StorageRootPanel } from "@/components/settings/storage-root-panel";
 import { SystemResetPanel } from "@/components/settings/system-reset-panel";
 import { ThemeSkinPanel } from "@/components/settings/theme-skin-panel";
 import { WorkspaceStatusPanel } from "@/components/settings/workspace-status-panel";
@@ -13,9 +15,9 @@ import { skin } from "@/components/theme/skin";
 import { aiProviderConfigService } from "@/lib/ai/ai-provider-config.service";
 import { getRuntimeAppConfig } from "@/lib/app-config/runtime-config";
 import { ensureDefaultCategories } from "@/lib/categories/category.service";
-import { getStorageRoot } from "@/lib/config";
 import { getNetworkAccessInfo } from "@/lib/network/access-info";
 import { prisma } from "@/lib/prisma";
+import { getStorageRootStatus } from "@/lib/storage/storage-root-config.service";
 import type { LucideIcon } from "lucide-react";
 import { Database, FolderTree, Palette, SearchCheck, Settings2, ShieldCheck, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
@@ -29,7 +31,8 @@ export default async function SettingsPage() {
   const accessInfo = getNetworkAccessInfo();
   const config = getRuntimeAppConfig();
   const activeSkin = config.themeSkins.options.find((option) => option.code === config.themeSkins.activeCode);
-  const storageRoot = getStorageRoot();
+  const storageRootStatus = await getStorageRootStatus();
+  const storageRoot = storageRootStatus.rootPath;
   await ensureDefaultCategories();
   const [materialCount, categoryCount, shooterCount, missingSearchCount] = await Promise.all([
     prisma.material.count(),
@@ -108,6 +111,8 @@ export default async function SettingsPage() {
                 <Info label="局域网 / 热点访问" value={accessInfo.addresses[0]?.url || "未检测到可用局域网 IP"} />
               </div>
               <WorkspaceStatusPanel />
+              <StorageRootPanel />
+              <CategoryDirectorySyncPanel />
               <RepairPanel />
             </SectionPanel>
           </div>
@@ -132,9 +137,9 @@ export default async function SettingsPage() {
             </SectionPanel>
 
             <SectionPanel
-              title="危险区域"
-              description="系统初始化只用于商用测试前清空测试数据；执行前必须预览、输入确认短语并生成 SQLite 备份。"
-              action={<StatusPill tone="danger">永久删除</StatusPill>}
+              title="系统维护"
+              description="系统完全初始化只清空数据库并重建默认配置；不删除、不移动、不复制 storage root 中的物理文件。"
+              action={<StatusPill tone="warning">高风险维护</StatusPill>}
             >
               <SystemResetPanel />
             </SectionPanel>

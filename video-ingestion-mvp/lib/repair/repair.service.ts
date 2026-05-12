@@ -12,6 +12,7 @@ import type {
   StorageSafeFixResult
 } from "@/lib/repair/storage-audit.types";
 import { buildSearchTextFromMaterial } from "@/lib/search/material-search.service";
+import { PROCESSING_DIR } from "@/lib/storage/storage.constants";
 import { storageService } from "@/lib/storage/storage.service";
 
 const DERIVATIVES_ROOT = "_derivatives";
@@ -35,9 +36,12 @@ const AUDIT_GROUPS: StorageAuditIssueGroup[] = [
   "METADATA_JSON",
   "DERIVATIVE_FILE",
   "AI_FRAME_INPUT",
+  "PROCESSING_TEMP_FILE",
   "CATEGORY_DIRECTORY",
   "INGESTION_JOB_SOURCE"
 ];
+
+const PROCESSING_TEMP_FRAME_SAMPLE_LIMIT = 8;
 
 type StorageAuditIssueDraft = Omit<StorageAuditIssue, "id"> & { id?: string };
 
@@ -53,8 +57,9 @@ export async function scanStorageHealth(): Promise<StorageAuditReport> {
   const files = await walkStorage(storageService.root);
   const normalizedFiles = files.map(normalizeRelative);
   const fileSet = new Set(normalizedFiles);
+  const processingTempFiles = normalizedFiles.filter(isProcessingTempFrame);
   const mediaFiles = normalizedFiles.filter((file) =>
-    MEDIA_EXTENSIONS.has(path.extname(file).toLowerCase()) && !isDerivativePath(file)
+    MEDIA_EXTENSIONS.has(path.extname(file).toLowerCase()) && !isDerivativePath(file) && !isProcessingTempFrame(file)
   );
   const derivativeDiskFiles = normalizedFiles.filter((file) => isDerivativePath(file));
   const metadataFiles = normalizedFiles.filter((file) => file.endsWith(".json") && file.includes("/metadata/"));
@@ -234,6 +239,10 @@ export async function scanStorageHealth(): Promise<StorageAuditReport> {
         message: "搜索索引为空，可以重建 searchText。"
       });
     }
+  }
+
+  for (const issue of buildProcessingTempFrameIssues(processingTempFiles)) {
+    issues.push(issue);
   }
 
   for (const relativePath of mediaFiles) {
@@ -510,7 +519,8 @@ function buildIssueId(issue: StorageAuditIssueDraft) {
     stringDetail(details.derivativeType),
     stringDetail(details.field),
     stringDetail(details.derivativePath),
-    stringDetail(details.thumbnailPath)
+    stringDetail(details.thumbnailPath),
+    stringDetail(details.frameCount)
   ];
   return stableParts.map((part) => encodeURIComponent(part)).join(":");
 }
@@ -956,6 +966,40 @@ function normalizeRelative(value: string) {
 
 function isDerivativePath(value: string) {
   return normalizeRelative(value).startsWith(`${DERIVATIVES_ROOT}/`);
+}
+
+function isProcessingTempFrame(value: string) {
+  const normalized = normalizeRelative(value);
+  return normalized.startsWith(`${PROCESSING_DIR}/`) &&
+    /^frame_\d+\.(jpg|jpeg|png)$/i.test(path.posix.basename(normalized));
+}
+
+function buildProcessingTempFrameIssues(relativePaths: string[]): StorageAuditIssueDraft[] {
+  const filesByDirectory = new Map<string, string[]>();
+  for (const relativePath of relativePaths) {
+    const directory = path.posix.dirname(normalizeRelative(relativePath));
+    const files = filesByDirectory.get(directory) ?? [];
+    files.push(normalizeRelative(relativePath));
+    filesByDirectory.set(directory, files);
+  }
+
+  return Array.from(filesByDirectory.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([directory, files]) => {
+      const sortedFiles = files.sort((left, right) => left.localeCompare(right));
+      return {
+        group: "PROCESSING_TEMP_FILE",
+        type: "PROCESSING_TEMP_FRAME_LEFTOVER",
+        severity: "warning",
+        fileName: path.posix.basename(directory),
+        relativePath: directory,
+        message: "处理中目录存在历史临时抽帧文件；这不是素材主文件孤儿文件。",
+        details: {
+          frameCount: sortedFiles.length,
+          sampleFiles: sortedFiles.slice(0, PROCESSING_TEMP_FRAME_SAMPLE_LIMIT)
+        }
+      };
+    });
 }
 
 function jsonStringArray(value: unknown) {

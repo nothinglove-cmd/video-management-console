@@ -12,8 +12,11 @@ import {
   type SourceType
 } from "@prisma/client";
 
-import { getStorageRoot } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
+import {
+  getCachedResolvedStorageRoot,
+  refreshResolvedStorageRoot
+} from "@/lib/storage/storage-root-config.service";
 import {
   FAILED_DIR,
   PENDING_DIRS,
@@ -117,9 +120,12 @@ function tagsToSearchText(value: unknown): string {
 }
 
 export class StorageService {
-  readonly root = getStorageRoot();
+  get root() {
+    return getCachedResolvedStorageRoot().rootPath;
+  }
 
   async initializeStorage() {
+    await refreshResolvedStorageRoot();
     await fs.mkdir(this.root, { recursive: true });
     await Promise.all(STORAGE_DIRECTORIES.map((directory) => fs.mkdir(this.resolve(directory), {
       recursive: true

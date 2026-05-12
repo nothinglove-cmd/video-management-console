@@ -60,6 +60,7 @@ const GROUPS: StorageAuditIssueGroup[] = [
   "METADATA_JSON",
   "DERIVATIVE_FILE",
   "AI_FRAME_INPUT",
+  "PROCESSING_TEMP_FILE",
   "CATEGORY_DIRECTORY",
   "INGESTION_JOB_SOURCE"
 ];
@@ -69,6 +70,7 @@ const GROUP_LABELS: Record<StorageAuditIssueGroup, string> = {
   METADATA_JSON: "metadata JSON",
   DERIVATIVE_FILE: "派生文件",
   AI_FRAME_INPUT: "AI 输入帧",
+  PROCESSING_TEMP_FILE: "处理中临时文件",
   CATEGORY_DIRECTORY: "栏目目录",
   INGESTION_JOB_SOURCE: "入库源文件"
 };
@@ -230,6 +232,11 @@ export function RepairPanel() {
                 </Surface>
               ))}
             </div>
+            {(report.counts.byGroup?.PROCESSING_TEMP_FILE ?? 0) > 0 ? (
+              <Surface tone="muted" padding="sm" className={cn("border-amber-200 bg-amber-50/70 text-amber-900", skin.typography.meta)}>
+                处理中临时文件通常是历史抽帧残留，不代表素材主文件缺失；如无入库任务运行，可后续通过专门清理入口处理。
+              </Surface>
+            ) : null}
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="secondary" className="min-h-10" onClick={selectAllSafeFixable} disabled={Boolean(busy) || (report.counts.safeFixableCount ?? 0) === 0}>
                 选择全部可安全修复
@@ -275,6 +282,7 @@ export function RepairPanel() {
                           </div>
                           <p className="mt-1 text-muted-foreground">{issue.message}</p>
                           {issue.relativePath ? <p className={cn("mt-1 break-all text-slate-500", skin.typography.path)}>{issue.relativePath}</p> : null}
+                          {issue.type === "PROCESSING_TEMP_FRAME_LEFTOVER" ? <ProcessingTempFrameDetails details={issue.details} /> : null}
                         </div>
                       ))}
                     </details>
@@ -303,4 +311,26 @@ function messageTone(message: string): SkinStatusTone {
   if (message.includes("失败") || message.includes("错误")) return "danger";
   if (message.includes("完成") || message.includes("已")) return "success";
   return "info";
+}
+
+function ProcessingTempFrameDetails({ details }: { details?: Record<string, unknown> }) {
+  const frameCount = typeof details?.frameCount === "number" ? details.frameCount : 0;
+  const sampleFiles = Array.isArray(details?.sampleFiles)
+    ? details.sampleFiles.filter((item): item is string => typeof item === "string")
+    : [];
+
+  if (frameCount === 0 && sampleFiles.length === 0) return null;
+
+  return (
+    <Surface tone="muted" padding="sm" className={cn("mt-2 border-amber-100 bg-amber-50/60 text-amber-900", skin.typography.meta)}>
+      <p className="font-semibold">临时帧数量：{frameCount}</p>
+      {sampleFiles.length > 0 ? (
+        <div className="mt-1 space-y-1">
+          {sampleFiles.map((item) => (
+            <p key={item} className="break-all">{item}</p>
+          ))}
+        </div>
+      ) : null}
+    </Surface>
+  );
 }

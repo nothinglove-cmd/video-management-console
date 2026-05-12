@@ -1,15 +1,26 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import { Prisma } from "@prisma/client";
 
 import { ensureDefaultCategories } from "@/lib/categories/category.service";
-import { getStorageRoot } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { STORAGE_DIRECTORIES } from "@/lib/storage/storage.constants";
+import {
+  getResolvedStorageRoot,
+  refreshResolvedStorageRoot
+} from "@/lib/storage/storage-root-config.service";
 import { StorageService } from "@/lib/storage/storage.service";
-import { ensureDefaultWorkspace } from "@/lib/workspace/default-workspace.service";
+import {
+  DEFAULT_INDUSTRY_TEMPLATE_CODE,
+  DEFAULT_MENU_CODE,
+  DEFAULT_STORAGE_PROVIDER_CODE,
+  DEFAULT_TERMINOLOGY_CODE,
+  DEFAULT_THEME_CODE,
+  DEFAULT_WORKSPACE_CODE,
+  ensureDefaultWorkspace
+} from "@/lib/workspace/default-workspace.service";
 
-export const SYSTEM_RESET_CONFIRMATION = "PERMANENT_RESET_SYSTEM";
+export const SYSTEM_RESET_CONFIRMATION = "RESET_SYSTEM_KEEP_FILES";
 
 const PROJECT_ROOT = process.cwd();
 const DEV_DB_PATH = path.join(PROJECT_ROOT, "prisma", "dev.db");
@@ -37,21 +48,24 @@ export type SystemResetPreview = {
   generatedAt: string;
   requiredConfirmation: typeof SYSTEM_RESET_CONFIRMATION;
   storageRoot: string;
-  storageRootSafety: {
-    ok: boolean;
-    message: string;
-  };
-  storageRootTopLevel: {
-    directoryCount: number;
-    fileCount: number;
-    entries: Array<{ name: string; type: "directory" | "file" | "symlink" | "other" }>;
-  };
-  storageRootRecursive: {
-    directoryCount: number;
-    fileCount: number;
+  storageRootSource: "db" | "env";
+  willDeleteStorageFiles: false;
+  sqliteBackup: {
+    required: true;
+    pattern: string;
   };
   hasRunningIngestionJob: boolean;
   counts: Record<TableCountKey, number>;
+  rebuilds: {
+    workspaceCode: typeof DEFAULT_WORKSPACE_CODE;
+    storageProviderCode: typeof DEFAULT_STORAGE_PROVIDER_CODE;
+    themePresetCode: typeof DEFAULT_THEME_CODE;
+    menuConfigCode: typeof DEFAULT_MENU_CODE;
+    terminologyPackCode: typeof DEFAULT_TERMINOLOGY_CODE;
+    industryTemplateCode: typeof DEFAULT_INDUSTRY_TEMPLATE_CODE;
+    standardDirectoryCount: number;
+    defaultCategories: true;
+  };
 };
 
 export type ExecuteSystemResetInput = {
@@ -61,23 +75,34 @@ export type ExecuteSystemResetInput = {
 };
 
 export async function getSystemResetPreview(): Promise<SystemResetPreview> {
-  const storageRoot = getStorageRoot();
-  const [counts, hasRunningIngestionJob, storageSummary, storageRootSafety] = await Promise.all([
+  const resolvedStorageRoot = await getResolvedStorageRoot();
+  const [counts, hasRunningIngestionJob] = await Promise.all([
     getTableCounts(),
-    prisma.ingestionJob.count({ where: { status: "RUNNING" } }).then((count) => count > 0),
-    summarizeStorageRoot(storageRoot),
-    validateStorageRoot(storageRoot)
+    prisma.ingestionJob.count({ where: { status: "RUNNING" } }).then((count) => count > 0)
   ]);
 
   return {
     generatedAt: new Date().toISOString(),
     requiredConfirmation: SYSTEM_RESET_CONFIRMATION,
-    storageRoot,
-    storageRootSafety,
-    storageRootTopLevel: storageSummary.topLevel,
-    storageRootRecursive: storageSummary.recursive,
+    storageRoot: resolvedStorageRoot.rootPath,
+    storageRootSource: resolvedStorageRoot.source,
+    willDeleteStorageFiles: false,
+    sqliteBackup: {
+      required: true,
+      pattern: "prisma/dev.db.system-reset-backup-YYYYMMDD-HHMMSS"
+    },
     hasRunningIngestionJob,
-    counts
+    counts,
+    rebuilds: {
+      workspaceCode: DEFAULT_WORKSPACE_CODE,
+      storageProviderCode: DEFAULT_STORAGE_PROVIDER_CODE,
+      themePresetCode: DEFAULT_THEME_CODE,
+      menuConfigCode: DEFAULT_MENU_CODE,
+      terminologyPackCode: DEFAULT_TERMINOLOGY_CODE,
+      industryTemplateCode: DEFAULT_INDUSTRY_TEMPLATE_CODE,
+      standardDirectoryCount: STORAGE_DIRECTORIES.length,
+      defaultCategories: true
+    }
   };
 }
 
@@ -85,23 +110,21 @@ export async function executeSystemReset(input: ExecuteSystemResetInput) {
   if (input.confirmation !== SYSTEM_RESET_CONFIRMATION) {
     throw new Error(`确认短语必须严格等于 ${SYSTEM_RESET_CONFIRMATION}。`);
   }
-  if (input.deleteStorageRootContents !== true) {
-    throw new Error("deleteStorageRootContents 必须为 true。");
+  if (input.deleteStorageRootContents === true) {
+    throw new Error("系统完全初始化不会删除物理文件，已拒绝 deleteStorageRootContents: true。");
   }
 
+  const resolvedStorageRoot = await getResolvedStorageRoot();
   const preview = await getSystemResetPreview();
-  if (!preview.storageRootSafety.ok) {
-    throw new Error(preview.storageRootSafety.message);
-  }
   if (preview.hasRunningIngestionJob) {
     throw new Error("存在 RUNNING 入库任务。请先停止或等待后台任务完成后再执行系统初始化。");
   }
 
   const sqliteBackupPath = await backupSqliteDatabase();
-  const deletedStorage = await clearStorageRootContents(preview.storageRoot);
   const deletedRecords = await clearDatabaseRecords();
-  const defaults = await ensureDefaultWorkspace();
+  const defaults = await rebuildDefaultsWithStorageRoot(resolvedStorageRoot.rootPath);
   await ensureDefaultCategories();
+  await refreshResolvedStorageRoot();
   const storageService = new StorageService();
   await storageService.initializeStorage();
   const rebuiltCounts = await getRebuiltDefaultCounts();
@@ -112,8 +135,9 @@ export async function executeSystemReset(input: ExecuteSystemResetInput) {
       ? input.operatorName.trim()
       : "本地管理员",
     sqliteBackupPath,
-    storageRoot: preview.storageRoot,
-    deletedStorage,
+    storageRoot: resolvedStorageRoot.rootPath,
+    storageRootSource: resolvedStorageRoot.source,
+    willDeleteStorageFiles: false,
     deletedRecords,
     rebuiltDefaults: {
       workspaceCode: defaults.workspace.code,
@@ -185,72 +209,6 @@ async function getTableCounts(): Promise<Record<TableCountKey, number>> {
   };
 }
 
-async function summarizeStorageRoot(storageRoot: string) {
-  const safety = await validateStorageRoot(storageRoot);
-  if (!safety.ok) {
-    return {
-      topLevel: { directoryCount: 0, fileCount: 0, entries: [] },
-      recursive: { directoryCount: 0, fileCount: 0 }
-    };
-  }
-
-  const entries = await fs.readdir(storageRoot, { withFileTypes: true });
-  const topLevelEntries = entries.map((entry) => ({
-    name: entry.name,
-    type: direntType(entry)
-  }));
-  const recursive = { directoryCount: 0, fileCount: 0 };
-
-  await Promise.all(entries.map(async (entry) => {
-    const childPath = path.join(storageRoot, entry.name);
-    assertInsideRoot(storageRoot, childPath);
-    const childCounts = await countRecursive(childPath);
-    recursive.directoryCount += childCounts.directoryCount;
-    recursive.fileCount += childCounts.fileCount;
-  }));
-
-  return {
-    topLevel: {
-      directoryCount: topLevelEntries.filter((entry) => entry.type === "directory").length,
-      fileCount: topLevelEntries.filter((entry) => entry.type !== "directory").length,
-      entries: topLevelEntries
-    },
-    recursive
-  };
-}
-
-async function validateStorageRoot(storageRoot: string) {
-  const raw = process.env.STORAGE_ROOT?.trim();
-  const resolved = path.resolve(storageRoot || "");
-  const home = path.resolve(os.homedir());
-  const projectRoot = path.resolve(PROJECT_ROOT);
-
-  if (!raw && !storageRoot) {
-    return { ok: false, message: "STORAGE_ROOT 为空，拒绝执行。" };
-  }
-  if (!resolved || resolved === path.parse(resolved).root) {
-    return { ok: false, message: `STORAGE_ROOT 指向危险路径：${resolved}` };
-  }
-  if (resolved === home) {
-    return { ok: false, message: "STORAGE_ROOT 不能是用户 home 目录。" };
-  }
-  if (resolved === projectRoot || isAncestorPath(resolved, projectRoot)) {
-    return { ok: false, message: "STORAGE_ROOT 不能是项目目录或项目目录的上级目录。" };
-  }
-
-  let stat;
-  try {
-    stat = await fs.stat(resolved);
-  } catch {
-    return { ok: false, message: `STORAGE_ROOT 不存在：${resolved}` };
-  }
-  if (!stat.isDirectory()) {
-    return { ok: false, message: `STORAGE_ROOT 不是目录：${resolved}` };
-  }
-
-  return { ok: true, message: "STORAGE_ROOT 路径校验通过。" };
-}
-
 async function backupSqliteDatabase() {
   await fs.access(DEV_DB_PATH);
   const now = new Date();
@@ -277,22 +235,6 @@ async function getUniqueBackupPath(basePath: string) {
     index += 1;
   }
   return candidate;
-}
-
-async function clearStorageRootContents(storageRoot: string) {
-  const entries = await fs.readdir(storageRoot, { withFileTypes: true });
-  const counts = { deletedTopLevelEntries: entries.length, deletedDirectories: 0, deletedFiles: 0 };
-
-  for (const entry of entries) {
-    const childPath = path.join(storageRoot, entry.name);
-    assertInsideRoot(storageRoot, childPath);
-    const childCounts = await countRecursive(childPath);
-    counts.deletedDirectories += childCounts.directoryCount;
-    counts.deletedFiles += childCounts.fileCount;
-    await fs.rm(childPath, { recursive: true, force: true });
-  }
-
-  return counts;
 }
 
 async function clearDatabaseRecords() {
@@ -331,6 +273,38 @@ async function clearDatabaseRecords() {
   return deletedRecordCounts;
 }
 
+async function rebuildDefaultsWithStorageRoot(storageRoot: string) {
+  const defaults = await ensureDefaultWorkspace();
+  const storageConfig = {
+    storageRootSource: "system-reset-preserved-effective-root",
+    containsSecrets: false
+  } satisfies Record<string, unknown>;
+
+  const storageProvider = await prisma.storageProvider.update({
+    where: { code: DEFAULT_STORAGE_PROVIDER_CODE },
+    data: {
+      rootPath: storageRoot,
+      config: storageConfig as Prisma.InputJsonValue,
+      status: "ACTIVE"
+    }
+  });
+
+  const workspace = await prisma.workspace.update({
+    where: { code: DEFAULT_WORKSPACE_CODE },
+    data: {
+      storageRoot,
+      defaultStorageProviderId: storageProvider.id,
+      status: "ACTIVE"
+    }
+  });
+
+  return {
+    ...defaults,
+    workspace,
+    storageProvider
+  };
+}
+
 async function getRebuiltDefaultCounts() {
   const [categoryCount] = await Promise.all([
     prisma.category.count({ where: { NOT: { status: "DELETED" } } })
@@ -351,42 +325,6 @@ async function getRebuiltDefaultCounts() {
     categoryCount,
     standardDirectoryCount: standardDirectoryChecks.filter(Boolean).length
   };
-}
-
-async function countRecursive(targetPath: string): Promise<{ directoryCount: number; fileCount: number }> {
-  const stat = await fs.lstat(targetPath);
-  if (!stat.isDirectory()) return { directoryCount: 0, fileCount: 1 };
-
-  const entries = await fs.readdir(targetPath, { withFileTypes: true });
-  const counts = { directoryCount: 1, fileCount: 0 };
-  for (const entry of entries) {
-    const childPath = path.join(targetPath, entry.name);
-    const childCounts = await countRecursive(childPath);
-    counts.directoryCount += childCounts.directoryCount;
-    counts.fileCount += childCounts.fileCount;
-  }
-  return counts;
-}
-
-function direntType(entry: import("node:fs").Dirent): "directory" | "file" | "symlink" | "other" {
-  if (entry.isDirectory()) return "directory";
-  if (entry.isFile()) return "file";
-  if (entry.isSymbolicLink()) return "symlink";
-  return "other";
-}
-
-function assertInsideRoot(storageRoot: string, targetPath: string) {
-  const root = path.resolve(storageRoot);
-  const target = path.resolve(targetPath);
-  const rootWithSeparator = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
-  if (target !== root && !target.startsWith(rootWithSeparator)) {
-    throw new Error(`拒绝操作 STORAGE_ROOT 之外的路径：${target}`);
-  }
-}
-
-function isAncestorPath(parentPath: string, childPath: string) {
-  const relative = path.relative(parentPath, childPath);
-  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
 async function pathExists(targetPath: string) {

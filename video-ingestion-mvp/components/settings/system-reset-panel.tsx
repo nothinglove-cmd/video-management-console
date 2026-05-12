@@ -11,24 +11,27 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { Panel, Surface } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 
-const REQUIRED_CONFIRMATION = "PERMANENT_RESET_SYSTEM";
+const REQUIRED_CONFIRMATION = "RESET_SYSTEM_KEEP_FILES";
 
 type SystemResetPreview = {
   generatedAt: string;
   requiredConfirmation: string;
   storageRoot: string;
-  storageRootSafety: {
-    ok: boolean;
-    message: string;
+  storageRootSource: "db" | "env";
+  willDeleteStorageFiles: false;
+  sqliteBackup: {
+    required: true;
+    pattern: string;
   };
-  storageRootTopLevel: {
-    directoryCount: number;
-    fileCount: number;
-    entries: Array<{ name: string; type: "directory" | "file" | "symlink" | "other" }>;
-  };
-  storageRootRecursive: {
-    directoryCount: number;
-    fileCount: number;
+  rebuilds: {
+    workspaceCode: string;
+    storageProviderCode: string;
+    themePresetCode: string;
+    menuConfigCode: string;
+    terminologyPackCode: string;
+    industryTemplateCode: string;
+    standardDirectoryCount: number;
+    defaultCategories: true;
   };
   hasRunningIngestionJob: boolean;
   counts: Record<string, number>;
@@ -39,11 +42,8 @@ type SystemResetResult = {
   operatorName: string;
   sqliteBackupPath: string;
   storageRoot: string;
-  deletedStorage: {
-    deletedTopLevelEntries: number;
-    deletedDirectories: number;
-    deletedFiles: number;
-  };
+  storageRootSource: "db" | "env";
+  willDeleteStorageFiles: false;
   deletedRecords: Record<string, number>;
   rebuiltDefaults: {
     workspaceCode: string;
@@ -84,7 +84,7 @@ export function SystemResetPanel() {
   const [busy, setBusy] = useState(false);
 
   const canExecute = useMemo(
-    () => confirmation === REQUIRED_CONFIRMATION && !busy && preview?.storageRootSafety.ok && !preview.hasRunningIngestionJob,
+    () => confirmation === REQUIRED_CONFIRMATION && !busy && Boolean(preview) && !preview?.hasRunningIngestionJob,
     [busy, confirmation, preview]
   );
 
@@ -107,7 +107,7 @@ export function SystemResetPanel() {
 
   async function executeReset() {
     const confirmed = window.confirm(
-      `将永久清空 STORAGE_ROOT 内全部内容，并清空业务数据库记录。\n\n确认短语：${REQUIRED_CONFIRMATION}\n\n执行前会备份 SQLite。此操作不可从存储目录恢复，是否继续？`
+      `将清空业务数据库和配置，并重建默认系统。\n\n不会删除、移动、复制 STORAGE_ROOT 中的任何物理文件。\n\n确认短语：${REQUIRED_CONFIRMATION}\n\n执行前会备份 SQLite。是否继续？`
     );
     if (!confirmed) return;
 
@@ -119,8 +119,7 @@ export function SystemResetPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         confirmation,
-        operatorName,
-        deleteStorageRootContents: true
+        operatorName
       })
     });
     const data = await response.json().catch(() => ({}));
@@ -136,22 +135,22 @@ export function SystemResetPanel() {
   }
 
   return (
-    <Panel padding="none" className="overflow-hidden border-red-200 bg-red-50/30" style={skin.vars}>
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-red-200 px-4 py-3">
+    <Panel padding="none" className="overflow-hidden border-amber-200 bg-amber-50/30" style={skin.vars}>
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-200 px-4 py-3">
         <div>
-          <p className={skin.typography.sectionTitle}>系统初始化</p>
-          <p className={cn("mt-1 text-red-900/80", skin.typography.meta)}>永久清空测试数据并恢复新安装状态</p>
+          <p className={skin.typography.sectionTitle}>系统完全初始化</p>
+          <p className={cn("mt-1 text-amber-900/80", skin.typography.meta)}>清空数据库并重建默认系统，不删除物理文件</p>
         </div>
-        <StatusPill tone="danger" withDot>高危操作</StatusPill>
+        <StatusPill tone="warning" withDot>高风险维护</StatusPill>
       </div>
 
       <div className="space-y-3 p-[var(--skin-panel-padding)]">
-        <Surface tone="muted" padding="sm" className={cn("border-red-200 bg-white/80 text-red-950", skin.typography.body)}>
+        <Surface tone="muted" padding="sm" className={cn("border-amber-200 bg-white/80 text-amber-950", skin.typography.body)}>
           <div className="flex items-start gap-2">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="space-y-1">
-              <p className="font-semibold">本操作会永久删除 STORAGE_ROOT 内所有子内容，不归档存储目录。</p>
-              <p className={skin.typography.meta}>保留项目代码、.env、docs、schema、package 文件、现有备份文件，并在删除前新增 SQLite 备份。</p>
+              <p className="font-semibold">本操作只清空数据库业务表和配置表，不删除、不移动、不复制 STORAGE_ROOT 中的任何物理文件。</p>
+              <p className={skin.typography.meta}>会保留当前有效存储根目录，并在重建默认 Workspace / StorageProvider 后写回该 root；执行前会新增 SQLite 备份。</p>
             </div>
           </div>
         </Surface>
@@ -170,12 +169,11 @@ export function SystemResetPanel() {
 
         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)]">
           <Surface tone="muted" padding="sm" className="min-w-0">
-            <p className={skin.typography.label}>STORAGE_ROOT</p>
+            <p className={skin.typography.label}>当前有效 storage root</p>
             <p className={cn("mt-1 break-all font-medium", skin.typography.value)}>{preview?.storageRoot || "读取中..."}</p>
             <div className="mt-2 flex flex-wrap gap-2">
-              <StatusPill tone={preview?.storageRootSafety.ok ? "success" : "danger"}>
-                {preview?.storageRootSafety.message || "等待校验"}
-              </StatusPill>
+              <StatusPill tone="info">来源：{preview?.storageRootSource === "db" ? "后台保存配置" : ".env fallback"}</StatusPill>
+              <StatusPill tone={preview?.willDeleteStorageFiles === false ? "success" : "danger"}>不删除物理文件</StatusPill>
               <StatusPill tone={preview?.hasRunningIngestionJob ? "danger" : "success"}>
                 {preview?.hasRunningIngestionJob ? "存在 RUNNING 任务" : "无 RUNNING 任务"}
               </StatusPill>
@@ -183,42 +181,29 @@ export function SystemResetPanel() {
           </Surface>
           <Surface tone="muted" padding="sm">
             <div className="grid grid-cols-2 gap-2">
-              <Metric label="顶层目录" value={preview?.storageRootTopLevel.directoryCount ?? 0} />
-              <Metric label="顶层文件" value={preview?.storageRootTopLevel.fileCount ?? 0} />
-              <Metric label="递归目录" value={preview?.storageRootRecursive.directoryCount ?? 0} />
-              <Metric label="递归文件" value={preview?.storageRootRecursive.fileCount ?? 0} />
+              <Metric label="Workspace" value={preview?.rebuilds.workspaceCode ?? "default"} />
+              <Metric label="StorageProvider" value={preview?.rebuilds.storageProviderCode ?? "local-default"} />
+              <Metric label="标准目录" value={preview?.rebuilds.standardDirectoryCount ?? 0} />
+              <Metric label="默认栏目" value={preview?.rebuilds.defaultCategories ? "重建" : "等待预览"} />
             </div>
           </Surface>
         </div>
 
-        {preview?.storageRootTopLevel.entries.length ? (
-          <Surface tone="muted" padding="sm" className={cn("max-h-28 overflow-auto", skin.typography.meta)}>
-            <p className="mb-1 font-semibold text-foreground">将删除的 STORAGE_ROOT 顶层内容</p>
-            <div className="flex flex-wrap gap-1">
-              {preview.storageRootTopLevel.entries.map((entry) => (
-                <span key={entry.name} className="rounded-[var(--skin-radius-control)] border border-[color:var(--skin-border)] bg-white px-2 py-1">
-                  {entry.name} / {entry.type}
-                </span>
-              ))}
-            </div>
-          </Surface>
-        ) : null}
-
         <div className="grid gap-2 md:grid-cols-2">
           <Surface tone="muted" padding="sm" className={skin.typography.bodyDense}>
-            <p className="font-semibold">将永久删除</p>
-            <p className="mt-1 text-muted-foreground">旧素材原片、metadata JSON、_derivatives、处理中临时帧、失败目录、回收站、设备导入历史内容，以及业务数据表记录。</p>
+            <p className="font-semibold">将清空</p>
+            <p className="mt-1 text-muted-foreground">业务数据表和配置表记录，包括素材、批次、入库任务、派生文件、AI 记录、拍摄人、栏目、Workspace 和默认配置。</p>
           </Surface>
           <Surface tone="muted" padding="sm" className={skin.typography.bodyDense}>
-            <p className="font-semibold">将恢复</p>
-            <p className="mt-1 text-muted-foreground">默认 workspace、local-default 存储、默认主题菜单术语行业模板、默认栏目和标准目录结构。</p>
+            <p className="font-semibold">将保留</p>
+            <p className="mt-1 text-muted-foreground">当前有效 storage root、STORAGE_ROOT 中所有真实文件和文件夹、项目代码、.env、docs、schema、package 文件和现有备份。</p>
           </Surface>
         </div>
 
         <Surface tone="muted" padding="sm" className={cn("border-amber-200 bg-amber-50/70 text-amber-950", skin.typography.bodyDense)}>
           <div className="flex items-start gap-2">
             <DatabaseBackup className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>执行前会备份 SQLite 到 prisma/dev.db.system-reset-backup-YYYYMMDD-HHMMSS；如同名存在会追加序号。</p>
+            <p>执行前会备份 SQLite 到 {preview?.sqliteBackup.pattern || "prisma/dev.db.system-reset-backup-YYYYMMDD-HHMMSS"}；如同名存在会追加序号。</p>
           </div>
         </Surface>
 
@@ -238,7 +223,7 @@ export function SystemResetPanel() {
             <RefreshCcw className="mr-2 h-4 w-4" /> 刷新预览
           </Button>
           <Button variant="destructive" className="min-h-10" onClick={executeReset} disabled={!canExecute}>
-            <AlertTriangle className="mr-2 h-4 w-4" /> 永久清空并恢复初始状态
+            <AlertTriangle className="mr-2 h-4 w-4" /> 清空数据库并重建默认系统（不删除文件）
           </Button>
         </div>
 
@@ -252,10 +237,10 @@ export function SystemResetPanel() {
           <Surface tone="muted" padding="sm" className={cn("space-y-2", skin.typography.bodyDense)}>
             <p className="font-semibold">执行结果</p>
             <p className="break-all">SQLite 备份：{result.sqliteBackupPath}</p>
+            <p className="break-all">保留 storage root：{result.storageRoot}</p>
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <Metric label="删除顶层项" value={result.deletedStorage.deletedTopLevelEntries} />
-              <Metric label="删除目录" value={result.deletedStorage.deletedDirectories} />
-              <Metric label="删除文件" value={result.deletedStorage.deletedFiles} />
+              <Metric label="物理文件删除" value={result.willDeleteStorageFiles ? "是" : "否"} />
+              <Metric label="root 来源" value={result.storageRootSource === "db" ? "后台配置" : ".env fallback"} />
               <Metric label="重建目录" value={result.rebuiltDefaults.standardDirectoryCount} />
               <Metric label="Workspace" value={result.rebuiltDefaults.workspaceCode} />
               <Metric label="StorageProvider" value={result.rebuiltDefaults.storageProviderCode} />

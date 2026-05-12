@@ -4,8 +4,8 @@ import { DEFAULT_INDUSTRY_TEMPLATE } from "../app-config/default-industry-templa
 import { DEFAULT_MENU_ITEMS } from "../app-config/default-menu";
 import { DEFAULT_TERMINOLOGY } from "../app-config/default-terminology";
 import { DEFAULT_THEME } from "../app-config/default-theme";
-import { getStorageRoot } from "../config";
 import { prisma } from "../prisma";
+import { getEnvStorageRoot } from "../storage/storage-root-config.service";
 
 export const DEFAULT_WORKSPACE_CODE = "default";
 export const DEFAULT_STORAGE_PROVIDER_CODE = "local-default";
@@ -19,7 +19,15 @@ function toJson(value: unknown): Prisma.InputJsonValue {
 }
 
 export async function ensureDefaultWorkspace() {
-  const storageRoot = getStorageRoot();
+  const envStorageRoot = getEnvStorageRoot();
+  const existingStorageProvider = await prisma.storageProvider.findUnique({
+    where: { code: DEFAULT_STORAGE_PROVIDER_CODE }
+  });
+  const existingWorkspace = await prisma.workspace.findUnique({
+    where: { code: DEFAULT_WORKSPACE_CODE }
+  });
+  const storageRoot = existingStorageProvider?.rootPath?.trim() || envStorageRoot;
+  const workspaceStorageRoot = existingWorkspace?.storageRoot?.trim() || storageRoot;
 
   const themePreset = await prisma.themePreset.upsert({
     where: { code: DEFAULT_THEME_CODE },
@@ -100,10 +108,6 @@ export async function ensureDefaultWorkspace() {
       name: "默认本地存储",
       type: "LOCAL",
       rootPath: storageRoot,
-      config: toJson({
-        storageRootSource: "STORAGE_ROOT",
-        containsSecrets: false
-      }),
       status: "ACTIVE"
     }
   });
@@ -113,7 +117,7 @@ export async function ensureDefaultWorkspace() {
     create: {
       code: DEFAULT_WORKSPACE_CODE,
       name: "默认工作空间",
-      storageRoot,
+      storageRoot: workspaceStorageRoot,
       defaultStorageProviderId: storageProvider.id,
       themePresetId: themePreset.id,
       menuConfigId: menuConfig.id,
@@ -124,7 +128,7 @@ export async function ensureDefaultWorkspace() {
     },
     update: {
       name: "默认工作空间",
-      storageRoot,
+      storageRoot: workspaceStorageRoot,
       defaultStorageProviderId: storageProvider.id,
       themePresetId: themePreset.id,
       menuConfigId: menuConfig.id,
