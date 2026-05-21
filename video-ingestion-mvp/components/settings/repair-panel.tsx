@@ -163,23 +163,39 @@ export function RepairPanel() {
             <AlertTriangle className="h-4 w-4" /> 安全原则
           </div>
           <p className={cn("min-w-0", skin.typography.meta)}>
-            扫描只生成报告，不会自动移动文件、删除文件或修改数据库。修复按钮仍只做原有可逆或可重建动作：重建搜索索引、补 metadata、从 metadata 恢复数据库记录。
+            扫描只生成报告，不会自动移动文件、删除文件或修改数据库。修复按钮仍只做原有可逆或可重建动作：重建搜索索引、重建素材说明文件、从说明文件恢复缺失素材记录。
           </p>
         </Surface>
 
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <Button variant="secondary" className="min-h-10" onClick={() => post("/api/admin/repair/scan", () => "扫描完成。")} disabled={Boolean(busy)}>
-            <SearchCheck className="mr-2 h-4 w-4" /> 扫描目录
-          </Button>
-          <Button variant="secondary" className="min-h-10" onClick={() => post("/api/admin/repair/rebuild-search-index", (data) => `已重建 ${data.updated ?? 0} 条索引。`)} disabled={Boolean(busy)}>
-            <RefreshCcw className="mr-2 h-4 w-4" /> 重建搜索索引
-          </Button>
-          <Button variant="secondary" className="min-h-10" onClick={() => post("/api/admin/repair/rebuild-metadata", (data) => `已写入 ${data.written ?? 0} 个 metadata。`)} disabled={Boolean(busy)}>
-            <FileJson className="mr-2 h-4 w-4" /> 补 metadata
-          </Button>
-          <Button variant="secondary" className="min-h-10" onClick={() => post("/api/admin/repair/rebuild-from-metadata", (data) => `已恢复 ${data.created ?? 0} 条记录，跳过 ${data.skipped ?? 0} 条。`)} disabled={Boolean(busy)}>
-            <Database className="mr-2 h-4 w-4" /> 从 metadata 恢复
-          </Button>
+          <RepairAction
+            icon={SearchCheck}
+            label="扫描健康状态"
+            description="只生成报告，不修改数据库或文件。"
+            disabled={Boolean(busy)}
+            onClick={() => post("/api/admin/repair/scan", () => "扫描完成。")}
+          />
+          <RepairAction
+            icon={RefreshCcw}
+            label="重建搜索索引"
+            description="让素材重新可被搜索。"
+            disabled={Boolean(busy)}
+            onClick={() => post("/api/admin/repair/rebuild-search-index", (data) => `已重建 ${data.updated ?? 0} 条索引。`)}
+          />
+          <RepairAction
+            icon={FileJson}
+            label="重建素材说明文件"
+            description="根据数据库重新写 metadata JSON。"
+            disabled={Boolean(busy)}
+            onClick={() => post("/api/admin/repair/rebuild-metadata", (data) => `已写入 ${data.written ?? 0} 个素材说明文件。`)}
+          />
+          <RepairAction
+            icon={Database}
+            label="从说明文件恢复素材记录"
+            description="从已有 metadata JSON 恢复缺失素材记录。"
+            disabled={Boolean(busy)}
+            onClick={() => post("/api/admin/repair/rebuild-from-metadata", (data) => `已恢复 ${data.created ?? 0} 条记录，跳过 ${data.skipped ?? 0} 条。`)}
+          />
         </div>
 
         {message ? (
@@ -244,6 +260,9 @@ export function RepairPanel() {
               <Button className="min-h-10" onClick={runSafeFix} disabled={Boolean(busy) || selectedIssueIds.length === 0}>
                 修复已选择的低风险问题（{selectedIssueIds.length}）
               </Button>
+              <p className={cn("basis-full text-muted-foreground sm:basis-auto", skin.typography.meta)}>
+                修复低风险问题不会删除或移动真实素材。
+              </p>
               {selectedIssueIds.length > 0 ? (
                 <Button variant="ghost" className="min-h-10" onClick={() => setSelectedIssueIds([])} disabled={Boolean(busy)}>
                   清空选择
@@ -299,6 +318,29 @@ export function RepairPanel() {
 
 function Metric({ label, value, tone = "neutral", icon }: { label: string; value: number; tone?: SkinStatusTone; icon: LucideIcon }) {
   return <MetricCard label={label} value={value} tone={tone} icon={icon} className="p-2" />;
+}
+
+function RepairAction({
+  icon: Icon,
+  label,
+  description,
+  disabled,
+  onClick
+}: {
+  icon: LucideIcon;
+  label: string;
+  description: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div className="grid gap-1">
+      <Button variant="secondary" className="min-h-10 whitespace-normal text-left" onClick={onClick} disabled={disabled} title={description}>
+        <Icon className="mr-2 h-4 w-4 shrink-0" /> {label}
+      </Button>
+      <p className={cn("px-1 text-muted-foreground", skin.typography.meta)}>{description}</p>
+    </div>
+  );
 }
 
 function severityTone(severity: RepairIssue["severity"]): SkinStatusTone {
