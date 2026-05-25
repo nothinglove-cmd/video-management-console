@@ -4,6 +4,7 @@ import type { DerivativeFile, Material } from "@prisma/client";
 
 import { mediaService, type MediaInfo } from "@/lib/media/media.service";
 import { prisma } from "@/lib/prisma";
+import { nullableByteSizeToBigInt, nullableByteSizeToSafeNumber } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
 
 const DERIVATIVES_ROOT = "_derivatives";
@@ -189,7 +190,8 @@ export class DerivativeService {
       const preview = await mediaService.generatePreviewMp4({
         filePath: params.material.absolutePath,
         mediaInfo: params.mediaInfo,
-        outputPath: absolutePath
+        outputPath: absolutePath,
+        fileSize: nullableByteSizeToSafeNumber(params.material.fileSize)
       });
 
       if (!preview.previewPath) {
@@ -276,7 +278,7 @@ export class DerivativeService {
       absolutePath: params.absolutePath,
       fileName: path.basename(params.relativePath),
       mimeType: "image/jpeg",
-      fileSize: params.fileSize ?? null,
+      fileSize: nullableByteSizeToBigInt(params.fileSize),
       width: params.width ?? null,
       height: params.height ?? null,
       errorMessage: params.errorMessage ?? null
@@ -312,7 +314,7 @@ export class DerivativeService {
         absolutePath: params.absolutePath,
         fileName: path.basename(params.relativePath),
         mimeType: "image/jpeg",
-        fileSize: params.fileSize ?? null,
+        fileSize: nullableByteSizeToBigInt(params.fileSize),
         frameIndex: params.frameIndex,
         timecodeMs: null,
         errorMessage: params.errorMessage ?? null
@@ -349,7 +351,7 @@ export class DerivativeService {
       absolutePath: params.absolutePath,
       fileName: path.basename(params.relativePath),
       mimeType: "video/mp4",
-      fileSize: params.fileSize ?? null,
+      fileSize: nullableByteSizeToBigInt(params.fileSize),
       width: params.width ?? null,
       height: params.height ?? null,
       duration: params.duration ?? null,

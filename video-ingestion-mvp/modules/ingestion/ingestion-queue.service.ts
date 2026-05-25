@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import type { IngestionJob, IngestionJobStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { byteSizeToSafeNumber } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
 import { ingestionPipeline, type ManualAssetType } from "@/modules/ingestion/ingestion.pipeline";
 
@@ -166,7 +167,7 @@ class IngestionQueueService {
         sourceType: job.sourceType,
         incomingAbsolutePath,
         originalFileName: job.originalFileName,
-        fileSize: job.fileSize,
+        fileSize: byteSizeToSafeNumber(job.fileSize),
         mimeType: job.mimeType,
         uploaderName: job.uploaderName,
         shooterId: job.shooterId,

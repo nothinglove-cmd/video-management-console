@@ -1,3 +1,4 @@
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Prisma, type Category, type Material, type SourceType } from "@prisma/client";
@@ -5,6 +6,7 @@ import { Prisma, type Category, type Material, type SourceType } from "@prisma/c
 import { derivativeService } from "@/lib/media/derivative.service";
 import { mediaService } from "@/lib/media/media.service";
 import { prisma } from "@/lib/prisma";
+import { byteSizeToBigInt, byteSizeToSafeNumber } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
 import { getDefaultWorkspaceContext } from "@/lib/workspace/default-workspace.service";
 import { aiAnalysisJobService } from "@/modules/ai/ai-analysis-job.service";
@@ -49,6 +51,55 @@ const MEDIA_EXTENSIONS = new Set([
 ]);
 
 const DEVICE_IMPORTING_FILE = "_IMPORTING.txt";
+const DEVICE_IMPORT_ROOT = "01_待导入/设备拷贝";
+const DEVICE_IMPORT_SAMPLE_LIMIT = 6;
+const DEVICE_IMPORT_STABILITY_DELAY_MS = 1200;
+const LARGE_DEVICE_IMPORT_BYTES = 10 * 1024 ** 3;
+const HUGE_DEVICE_IMPORT_BYTES = 50 * 1024 ** 3;
+
+type DeviceImportFileInspection = {
+  name: string;
+  size: number;
+  modifiedAt: string;
+  mtimeMs: number;
+  deviceId: number;
+  absolutePath: string;
+  large: boolean;
+  huge: boolean;
+};
+
+type DeviceImportFileSummary = {
+  name: string;
+  size: number;
+  modifiedAt: string;
+  large: boolean;
+  huge: boolean;
+};
+
+type DeviceImportFolderInspection = {
+  folderName: string;
+  relativePath: string;
+  ready: boolean;
+  fileCount: number;
+  totalSize: number;
+  largestFile: DeviceImportFileSummary | null;
+  largeFileCount: number;
+  hugeFileCount: number;
+  files: string[];
+  sampleFiles: DeviceImportFileSummary[];
+  warnings: string[];
+  isImporting: boolean;
+  importingBatchId?: string;
+  importingInfo?: {
+    batchId?: string;
+    createdAt?: string;
+    fileCount?: number;
+    folderRelativePath?: string;
+  } | null;
+  allFiles: DeviceImportFileInspection[];
+};
+
+type DeviceImportFolderDto = Omit<DeviceImportFolderInspection, "allFiles">;
 
 export class IngestionPipeline {
   async ingestFile(input: IngestFileInput) {
@@ -72,8 +123,12 @@ export class IngestionPipeline {
       const frameResult = await mediaService.extractKeyFrames({
         filePath: workingPath,
         mediaInfo,
-        outputDirectory: processingAbsoluteDirectory
-      });
+        outputDirectory: processingAbsoluteDirectory,
+        fileSize: input.fileSize
+      }).catch((error) => ({
+        frames: [],
+        warnings: [`关键帧抽取流程失败，但原始文件入库继续：${(error as Error).message}`]
+      }));
       const selectedCategory = await this.resolveSelectedCategory(input.categoryId || input.userSelectedCategoryId);
       const categoryOptions = await this.listUploadableLeafCategoryOptions();
       const ingestIntent = normalizeIngestIntent({
@@ -134,7 +189,8 @@ export class IngestionPipeline {
       const moved = await storageService.moveRawFileToCategory({
         fromAbsolutePath: workingPath,
         targetCategory: decision.targetCategory,
-        storedFileName
+        storedFileName,
+        moveOptions: getDeviceImportLargeFileMoveOptions(input)
       });
       workingPath = moved.absolutePath;
 
@@ -206,7 +262,7 @@ export class IngestionPipeline {
           relativePath: moved.relativePath,
           absolutePath: moved.absolutePath,
           thumbnailPath: null,
-          fileSize: input.fileSize,
+          fileSize: byteSizeToBigInt(input.fileSize),
           mimeType: input.mimeType,
           duration: mediaInfo.duration,
           width: mediaInfo.width,
@@ -262,12 +318,19 @@ export class IngestionPipeline {
       const thumbnail = await derivativeService.generateThumbnailForMaterial({
         material,
         mediaInfo
-      });
+      }).catch((error) => ({
+        derivative: null,
+        thumbnailPath: null,
+        warnings: [`缩略图派生写入失败，但原始文件入库继续：${(error as Error).message}`]
+      }));
       warnings.push(...thumbnail.warnings.filter(Boolean));
       const aiFrames = await derivativeService.saveAiFramesForMaterial({
         material,
         framePaths: frameResult.frames
-      });
+      }).catch((error) => ({
+        derivatives: [],
+        warnings: [`AI 抽帧标准化失败，但原始文件入库继续：${(error as Error).message}`]
+      }));
       warnings.push(...aiFrames.warnings.filter(Boolean));
       const readyAiFramePaths = aiFrames.derivatives
         .filter((derivative) => derivative.status === "READY")
@@ -289,7 +352,11 @@ export class IngestionPipeline {
       const preview = await derivativeService.generatePreviewMp4ForMaterial({
         material,
         mediaInfo
-      });
+      }).catch((error) => ({
+        derivative: null,
+        previewPath: null,
+        warnings: [`preview MP4 派生写入失败，但原始文件入库继续：${(error as Error).message}`]
+      }));
       warnings.push(...preview.warnings.filter(Boolean));
       const materialWithThumbnail = thumbnail.thumbnailPath
         ? await prisma.material.update({
@@ -328,7 +395,11 @@ export class IngestionPipeline {
   async handleFailure(input: IngestFileInput, currentPath: string, error: Error) {
     const workspaceContext = await getDefaultWorkspaceContext();
     const materialId = await storageService.generateAssetId("UNKNOWN");
-    const failed = await storageService.moveFailedFile(currentPath, input.originalFileName);
+    const failed = await storageService.moveFailedFile(
+      currentPath,
+      input.originalFileName,
+      getDeviceImportLargeFileMoveOptions(input)
+    );
     const checksum = await mediaService.calculateChecksum(failed.absolutePath).catch(() => "sha256:failed");
     const searchText = storageService.buildSearchText({
       materialId,
@@ -360,7 +431,7 @@ export class IngestionPipeline {
         relativePath: failed.relativePath,
         absolutePath: failed.absolutePath,
         thumbnailPath: null,
-        fileSize: input.fileSize,
+        fileSize: byteSizeToBigInt(input.fileSize),
         mimeType: input.mimeType,
         duration: null,
         width: null,
@@ -589,8 +660,12 @@ export class IngestionPipeline {
     const frameResult = await mediaService.extractKeyFrames({
       filePath: material.absolutePath,
       mediaInfo,
-      outputDirectory: storageService.resolve(processingRelativeDirectory)
-    });
+      outputDirectory: storageService.resolve(processingRelativeDirectory),
+      fileSize: byteSizeToSafeNumber(material.fileSize)
+    }).catch((error) => ({
+      frames: [],
+      warnings: [`关键帧抽取流程失败，但重新 AI 识别继续：${(error as Error).message}`]
+    }));
     const ingestIntent = normalizeIngestIntent({
       shooterId: material.shooterId,
       shooterName: material.shooterName || material.uploaderName,
@@ -608,7 +683,7 @@ export class IngestionPipeline {
       userSelectedSubCategory: material.finalSubCategory || material.userSelectedSubCategory,
       customTags: ingestIntent.customTags,
       notes: material.notes,
-      fileSize: material.fileSize,
+      fileSize: byteSizeToSafeNumber(material.fileSize),
       mimeType: material.mimeType,
       duration: mediaInfo.duration,
       width: mediaInfo.width,
@@ -908,41 +983,19 @@ export class IngestionPipeline {
 
   async scanReadyDeviceImports() {
     await storageService.initializeStorage();
-    const deviceRoot = storageService.resolve("01_待导入/设备拷贝");
+    const deviceRoot = storageService.resolve(DEVICE_IMPORT_ROOT);
     const entries = await fs.readdir(deviceRoot, { withFileTypes: true });
-    const folders = [];
+    const folders: DeviceImportFolderDto[] = [];
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const folderAbsolutePath = path.join(deviceRoot, entry.name);
-      const readyPath = path.join(folderAbsolutePath, "_READY.txt");
-      const importingPath = path.join(folderAbsolutePath, DEVICE_IMPORTING_FILE);
-      try {
-        await fs.access(readyPath);
-      } catch {
-        continue;
-      }
-      const importingInfo = await readImportingInfo(importingPath);
-      const files = await fs.readdir(folderAbsolutePath, { withFileTypes: true });
-      const mediaFiles = files
-        .filter((file) => file.isFile())
-        .filter((file) => file.name !== "_READY.txt")
-        .filter((file) => file.name !== DEVICE_IMPORTING_FILE)
-        .filter((file) => MEDIA_EXTENSIONS.has(path.extname(file.name).toLowerCase()))
-        .map((file) => file.name);
-
-      folders.push({
-        folderName: entry.name,
-        relativePath: path.join("01_待导入/设备拷贝", entry.name),
-        fileCount: mediaFiles.length,
-        files: mediaFiles,
-        isImporting: Boolean(importingInfo),
-        importingBatchId: importingInfo?.batchId,
-        importingInfo
-      });
+      const inspection = await this.inspectDeviceImportFolder(folderAbsolutePath, entry.name, { strict: false });
+      if (!inspection.ready && !inspection.isImporting && inspection.fileCount === 0) continue;
+      folders.push(toDeviceImportFolderDto(inspection));
     }
 
-    return folders;
+    return folders.sort((left, right) => left.folderName.localeCompare(right.folderName, "zh-CN"));
   }
 
   async importDeviceFolder(params: {
@@ -951,80 +1004,210 @@ export class IngestionPipeline {
     notes?: string | null;
   }) {
     await storageService.initializeStorage();
-    const folderRelativePath = path.join("01_待导入/设备拷贝", params.folderName);
+    const folderRelativePath = path.join(DEVICE_IMPORT_ROOT, params.folderName);
     const folderAbsolutePath = storageService.resolve(folderRelativePath);
-    await fs.access(path.join(folderAbsolutePath, "_READY.txt"));
     const importingPath = path.join(folderAbsolutePath, DEVICE_IMPORTING_FILE);
-    if (await fileExists(importingPath)) {
-      throw new Error("该设备导入文件夹已在处理中，请勿重复创建导入批次。");
-    }
-    const fileNames = (await fs.readdir(folderAbsolutePath, { withFileTypes: true }))
-      .filter((file) => file.isFile())
-      .filter((file) => file.name !== "_READY.txt")
-      .filter((file) => file.name !== DEVICE_IMPORTING_FILE)
-      .filter((file) => MEDIA_EXTENSIONS.has(path.extname(file.name).toLowerCase()))
-      .map((file) => file.name);
-    const stats = await Promise.all(fileNames.map((fileName) => fs.stat(path.join(folderAbsolutePath, fileName))));
+    const inspection = await this.preflightDeviceImportFolder(folderAbsolutePath, params.folderName);
+    const fileNames = inspection.allFiles.map((file) => file.name);
     const batchId = await storageService.createBatchId("DEVICE_IMPORT");
     const workspaceContext = await getDefaultWorkspaceContext();
-    await fs.writeFile(
-      importingPath,
-      JSON.stringify({
-        batchId,
-        createdAt: new Date().toISOString(),
-        fileCount: fileNames.length,
-        folderRelativePath
-      }, null, 2)
-    );
-
-    await prisma.importBatch.create({
-      data: {
-        workspaceId: workspaceContext.workspaceId,
-        batchId,
-        sourceType: "DEVICE_IMPORT",
-        uploaderName: params.uploaderName,
-        fileCount: fileNames.length,
-        totalSize: stats.reduce((sum, stat) => sum + stat.size, 0),
-        status: "PROCESSING",
-        notes: params.notes
-      }
-    });
-
-    const jobs = [];
-    for (const [index, fileName] of fileNames.entries()) {
-      const stat = stats[index];
-      const incomingRelativePath = path.join(folderRelativePath, fileName);
-      const job = await prisma.ingestionJob.create({
-        data: {
-          workspaceId: workspaceContext.workspaceId,
+    try {
+      await fs.writeFile(
+        importingPath,
+        JSON.stringify({
           batchId,
-          sourceType: "DEVICE_IMPORT",
-          incomingRelativePath,
-          originalFileName: fileName,
-          fileSize: stat.size,
-          mimeType: null,
-          uploaderName: params.uploaderName,
-          shooterName: params.uploaderName,
-          notes: params.notes,
-          manualAssetType: "AUTO",
-          status: "QUEUED"
+          createdAt: new Date().toISOString(),
+          fileCount: inspection.fileCount,
+          folderRelativePath
+        }, null, 2),
+        { flag: "wx" }
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error("该设备导入文件夹已在处理中，请勿重复创建导入批次。");
+      }
+      throw error;
+    }
+
+    const jobs: Array<{
+      jobId: string;
+      originalFileName: string;
+      fileSize: number;
+      sourceType: SourceType;
+      incomingRelativePath: string;
+      status: string;
+      createdAt: Date;
+    }> = [];
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.importBatch.create({
+          data: {
+            workspaceId: workspaceContext.workspaceId,
+            batchId,
+            sourceType: "DEVICE_IMPORT",
+            uploaderName: params.uploaderName,
+            fileCount: fileNames.length,
+            totalSize: byteSizeToBigInt(inspection.totalSize),
+            status: "PROCESSING",
+            notes: params.notes
+          }
+        });
+
+        for (const file of inspection.allFiles) {
+          const fileName = file.name;
+          const incomingRelativePath = path.join(folderRelativePath, fileName);
+          const job = await tx.ingestionJob.create({
+            data: {
+              workspaceId: workspaceContext.workspaceId,
+              batchId,
+              sourceType: "DEVICE_IMPORT",
+              incomingRelativePath,
+              originalFileName: fileName,
+              fileSize: byteSizeToBigInt(file.size),
+              mimeType: null,
+              uploaderName: params.uploaderName,
+              shooterName: params.uploaderName,
+              notes: params.notes,
+              manualAssetType: "AUTO",
+              status: "QUEUED"
+            }
+          });
+          jobs.push({
+            jobId: job.id,
+            originalFileName: job.originalFileName,
+            fileSize: byteSizeToSafeNumber(job.fileSize),
+            sourceType: job.sourceType,
+            incomingRelativePath: job.incomingRelativePath,
+            status: job.status,
+            createdAt: job.createdAt
+          });
         }
       });
-      jobs.push({
-        jobId: job.id,
-        originalFileName: job.originalFileName,
-        fileSize: job.fileSize,
-        sourceType: job.sourceType,
-        incomingRelativePath: job.incomingRelativePath,
-        status: job.status,
-        createdAt: job.createdAt
-      });
+    } catch (error) {
+      await fs.unlink(importingPath).catch(() => undefined);
+      throw error;
     }
 
     const { ingestionQueueService } = await import("@/modules/ingestion/ingestion-queue.service");
     ingestionQueueService.kick();
 
     return { batchId, queuedCount: jobs.length, jobs };
+  }
+
+  private async preflightDeviceImportFolder(folderAbsolutePath: string, folderName: string) {
+    await fs.access(folderAbsolutePath, fsConstants.R_OK | fsConstants.W_OK).catch(() => {
+      throw new Error("设备导入文件夹不可读或不可写，无法确认文件并写入处理中标记。");
+    });
+    await fs.access(storageService.root, fsConstants.W_OK).catch(() => {
+      throw new Error("STORAGE_ROOT 不可写，无法创建导入批次或后续派生文件。");
+    });
+
+    const storageRootStat = await fs.stat(storageService.root);
+    const first = await this.inspectDeviceImportFolder(folderAbsolutePath, folderName, { strict: true });
+    if (!first.ready) {
+      throw new Error("设备导入文件夹缺少 _READY.txt。请等待文件拷贝完成后再创建 _READY.txt。");
+    }
+    if (first.isImporting) {
+      throw new Error("该设备导入文件夹已在处理中，请勿重复创建导入批次。");
+    }
+    if (first.fileCount === 0) {
+      throw new Error("设备导入文件夹内没有可导入的视频或图片文件。");
+    }
+
+    const unreadableFiles: string[] = [];
+    for (const file of first.allFiles) {
+      await fs.access(file.absolutePath, fsConstants.R_OK).catch(() => unreadableFiles.push(file.name));
+    }
+    if (unreadableFiles.length > 0) {
+      throw new Error(`以下文件不可读，无法导入：${unreadableFiles.slice(0, 5).join("、")}`);
+    }
+
+    const crossDeviceLargeFile = first.allFiles.find((file) => file.large && file.deviceId !== storageRootStat.dev);
+    if (crossDeviceLargeFile) {
+      throw new Error(
+        `大文件「${crossDeviceLargeFile.name}」不在 STORAGE_ROOT 同一磁盘/卷内。` +
+        "为避免 10GB/50GB 文件跨盘复制，请把设备/NAS 导入目录放到同一个 STORAGE_ROOT 卷内。"
+      );
+    }
+
+    await wait(DEVICE_IMPORT_STABILITY_DELAY_MS);
+    const second = await this.inspectDeviceImportFolder(folderAbsolutePath, folderName, { strict: true });
+    assertStableDeviceImportFiles(first, second);
+    return second;
+  }
+
+  private async inspectDeviceImportFolder(
+    folderAbsolutePath: string,
+    folderName: string,
+    options: { strict: boolean }
+  ): Promise<DeviceImportFolderInspection> {
+    const readyPath = path.join(folderAbsolutePath, "_READY.txt");
+    const importingPath = path.join(folderAbsolutePath, DEVICE_IMPORTING_FILE);
+    const ready = await fileExists(readyPath);
+    const importingInfo = await readImportingInfo(importingPath);
+    const allFiles = await this.listDeviceImportMediaFiles(folderAbsolutePath, options);
+    const totalSize = allFiles.reduce((sum, file) => sum + file.size, 0);
+    const largest = allFiles.reduce<DeviceImportFileInspection | null>(
+      (current, file) => (!current || file.size > current.size ? file : current),
+      null
+    );
+    const largeFileCount = allFiles.filter((file) => file.large).length;
+    const hugeFileCount = allFiles.filter((file) => file.huge).length;
+    const warnings: string[] = [];
+    if (largeFileCount > 0) warnings.push(`包含 ${largeFileCount} 个 10GB+ 文件，建议保持后台队列串行处理。`);
+    if (hugeFileCount > 0) warnings.push(`包含 ${hugeFileCount} 个 50GB+ 文件，请确认 STORAGE_ROOT/NAS 剩余空间和供电稳定。`);
+
+    return {
+      folderName,
+      relativePath: path.join(DEVICE_IMPORT_ROOT, folderName),
+      ready,
+      fileCount: allFiles.length,
+      totalSize,
+      largestFile: largest ? toDeviceImportFileSummary(largest) : null,
+      largeFileCount,
+      hugeFileCount,
+      files: allFiles.slice(0, DEVICE_IMPORT_SAMPLE_LIMIT).map((file) => file.name),
+      sampleFiles: allFiles.slice(0, DEVICE_IMPORT_SAMPLE_LIMIT).map(toDeviceImportFileSummary),
+      warnings,
+      isImporting: Boolean(importingInfo),
+      importingBatchId: importingInfo?.batchId,
+      importingInfo,
+      allFiles
+    };
+  }
+
+  private async listDeviceImportMediaFiles(
+    folderAbsolutePath: string,
+    options: { strict: boolean }
+  ): Promise<DeviceImportFileInspection[]> {
+    const entries = await fs.readdir(folderAbsolutePath, { withFileTypes: true });
+    const mediaEntries = entries
+      .filter((file) => file.isFile())
+      .filter((file) => file.name !== "_READY.txt")
+      .filter((file) => file.name !== DEVICE_IMPORTING_FILE)
+      .filter((file) => MEDIA_EXTENSIONS.has(path.extname(file.name).toLowerCase()));
+    const files: DeviceImportFileInspection[] = [];
+
+    for (const entry of mediaEntries) {
+      const absolutePath = path.join(folderAbsolutePath, entry.name);
+      try {
+        const stat = await fs.stat(absolutePath);
+        files.push({
+          name: entry.name,
+          size: stat.size,
+          modifiedAt: new Date(stat.mtimeMs).toISOString(),
+          mtimeMs: stat.mtimeMs,
+          deviceId: stat.dev,
+          absolutePath,
+          large: stat.size >= LARGE_DEVICE_IMPORT_BYTES,
+          huge: stat.size >= HUGE_DEVICE_IMPORT_BYTES
+        });
+      } catch (error) {
+        if (options.strict) throw error;
+      }
+    }
+
+    return files.sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
   }
 }
 
@@ -1055,6 +1238,72 @@ async function fileExists(filePath: string) {
   } catch {
     return false;
   }
+}
+
+function toDeviceImportFileSummary(file: DeviceImportFileInspection): DeviceImportFileSummary {
+  return {
+    name: file.name,
+    size: file.size,
+    modifiedAt: file.modifiedAt,
+    large: file.large,
+    huge: file.huge
+  };
+}
+
+function toDeviceImportFolderDto(inspection: DeviceImportFolderInspection): DeviceImportFolderDto {
+  const { allFiles: _allFiles, ...dto } = inspection;
+  return dto;
+}
+
+function assertStableDeviceImportFiles(
+  first: DeviceImportFolderInspection,
+  second: DeviceImportFolderInspection
+) {
+  if (!second.ready) {
+    throw new Error("预检期间 _READY.txt 被移除，请确认目录状态后重新开始导入。");
+  }
+  if (second.isImporting) {
+    throw new Error("预检期间该文件夹已进入处理中，请勿重复创建导入批次。");
+  }
+
+  const beforeByName = new Map(first.allFiles.map((file) => [file.name, file]));
+  const afterByName = new Map(second.allFiles.map((file) => [file.name, file]));
+  const changedNames = new Set<string>();
+
+  for (const file of first.allFiles) {
+    if (!afterByName.has(file.name)) changedNames.add(file.name);
+  }
+  for (const file of second.allFiles) {
+    const before = beforeByName.get(file.name);
+    if (!before) {
+      changedNames.add(file.name);
+      continue;
+    }
+    if (before.size !== file.size || before.mtimeMs !== file.mtimeMs) {
+      changedNames.add(file.name);
+    }
+  }
+
+  if (changedNames.size > 0) {
+    throw new Error(
+      `检测到文件仍在写入或目录内容变化：${Array.from(changedNames).slice(0, 5).join("、")}。` +
+      "请等待设备/NAS 拷贝完成后再开始导入。"
+    );
+  }
+}
+
+function getDeviceImportLargeFileMoveOptions(input: IngestFileInput) {
+  if (input.sourceType !== "DEVICE_IMPORT" || input.fileSize < LARGE_DEVICE_IMPORT_BYTES) return undefined;
+  return {
+    allowCrossDeviceCopy: false,
+    crossDeviceErrorMessage:
+      `设备/NAS 导入的大文件「${input.originalFileName}」检测到跨磁盘/卷移动。` +
+      "为避免 10GB/50GB 文件被静默复制，请把导入目录和 STORAGE_ROOT 放在同一个磁盘/卷内。"
+  };
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 export const ingestionPipeline = new IngestionPipeline();

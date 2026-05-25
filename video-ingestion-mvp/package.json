@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -H 0.0.0.0",
+    "dev": "PORT=8888 next dev -H 0.0.0.0 -p 8888",
     "build": "next build",
-    "start": "next start -H 0.0.0.0",
+    "start": "PORT=8888 next start -H 0.0.0.0 -p 8888",
     "typecheck": "tsc --noEmit",
     "check:env": "sucrase-node scripts/check-env.ts",
     "backup:db": "sucrase-node scripts/backup-db.ts",

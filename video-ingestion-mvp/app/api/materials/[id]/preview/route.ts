@@ -18,9 +18,17 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const range = request.headers.get("range");
 
   if (range) {
-    const [startText, endText] = range.replace("bytes=", "").split("-");
-    const start = Number(startText);
-    const end = endText ? Number(endText) : stat.size - 1;
+    const parsed = parseRangeHeader(range, stat.size);
+    if (!parsed) {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          "Content-Range": `bytes */${stat.size}`,
+          "Accept-Ranges": "bytes"
+        }
+      });
+    }
+    const { start, end } = parsed;
     const stream = createReadStream(absolutePath, { start, end });
     return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array>, {
       status: 206,
@@ -40,6 +48,28 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       "Content-Length": String(stat.size)
     }
   });
+}
+
+function parseRangeHeader(range: string, size: number) {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+  if (!match || size <= 0) return null;
+
+  const [, startText, endText] = match;
+  if (!startText && !endText) return null;
+
+  if (!startText) {
+    const suffixLength = Number(endText);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null;
+    const start = Math.max(size - suffixLength, 0);
+    return { start, end: size - 1 };
+  }
+
+  const start = Number(startText);
+  const requestedEnd = endText ? Number(endText) : size - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd)) return null;
+  if (start < 0 || start >= size || requestedEnd < start) return null;
+  const end = Math.min(requestedEnd, size - 1);
+  return { start, end };
 }
 
 async function resolvePreviewSource(materialId: string) {

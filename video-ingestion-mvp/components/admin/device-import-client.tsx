@@ -9,13 +9,28 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { skin } from "@/components/theme/skin";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
+
+type DeviceImportSampleFile = {
+  name: string;
+  size: number;
+  modifiedAt: string;
+  large: boolean;
+  huge: boolean;
+};
 
 type ReadyFolder = {
   folderName: string;
   relativePath: string;
+  ready: boolean;
   fileCount: number;
+  totalSize: number;
+  largestFile: DeviceImportSampleFile | null;
+  largeFileCount: number;
+  hugeFileCount: number;
   files: string[];
+  sampleFiles: DeviceImportSampleFile[];
+  warnings: string[];
   isImporting?: boolean;
   importingBatchId?: string;
   importingInfo?: {
@@ -95,7 +110,7 @@ export function DeviceImportClient() {
   async function startImport(folderName: string) {
     if (isBatchActive(batchDetail)) return;
     setBusyFolder(folderName);
-    setMessage("");
+    setMessage("正在执行导入前预检：检查 _READY.txt、文件稳定性、权限和跨卷风险。");
     const response = await fetch("/api/device-import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -171,12 +186,15 @@ export function DeviceImportClient() {
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>设备拷贝目录</CardTitle>
+            <CardTitle>大文件导入目录</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className={cn("rounded-lg border bg-slate-50 p-3", skin.typography.path)}>
               {deviceImportPath || "正在读取目录..."}
             </div>
+            <p className={cn("text-muted-foreground", skin.typography.meta)}>
+              10GB+ 原片、50GB+ 直播录屏、NAS 或移动硬盘素材放到这里后再创建 _READY.txt。网页上传保留给小文件和中等文件。
+            </p>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={copyPath} disabled={!deviceImportPath}>
                 <Clipboard className="mr-2 h-4 w-4" /> 复制路径
@@ -190,7 +208,7 @@ export function DeviceImportClient() {
 
         <Card>
           <CardHeader>
-            <CardTitle>导入设置</CardTitle>
+            <CardTitle>批次信息</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <label className={cn("space-y-1.5 font-medium", skin.typography.body)}>
@@ -211,14 +229,14 @@ export function DeviceImportClient() {
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>操作步骤</CardTitle>
+            <CardTitle>目录导入流程</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-4">
             {[
-              "把设备素材文件夹放入 01_待导入/设备拷贝",
-              "在文件夹内创建 _READY.txt",
-              "点击重新扫描",
-              "选择批次并开始导入"
+              "把整批素材放入 01_待导入/设备拷贝",
+              "确认拷贝完成后创建 _READY.txt",
+              "重新扫描并检查大小与风险提示",
+              "开始导入，后台逐个入库"
             ].map((step, index) => (
               <div key={step} className={cn("rounded-lg border bg-slate-50 p-3", skin.typography.body)}>
                 <div className={cn("mb-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground", skin.typography.badge)}>
@@ -228,11 +246,21 @@ export function DeviceImportClient() {
               </div>
             ))}
           </CardContent>
+          <CardContent className="border-t pt-3">
+            <p className={cn("text-muted-foreground", skin.typography.meta)}>
+              预检会确认文件可读、目录可写、文件 size/mtime 稳定，并阻止 10GB+ 文件静默跨卷复制。剩余空间仍需人工确认，尤其是 50GB+ 直播录屏。
+            </p>
+          </CardContent>
         </Card>
 
         {message ? (
-          <div className={cn("flex items-center gap-2 rounded-lg border bg-white p-3 text-primary", skin.typography.body)}>
-            <CheckCircle2 className="h-4 w-4" /> {message}
+          <div className={cn(
+            "flex items-center gap-2 rounded-lg border bg-white p-3",
+            isErrorMessage(message) ? "text-red-700" : "text-primary",
+            skin.typography.body
+          )}>
+            {isErrorMessage(message) ? <AlertCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+            {message}
           </div>
         ) : null}
 
@@ -259,7 +287,7 @@ export function DeviceImportClient() {
                 title="暂无可导入批次"
                 description={
                   <div className="space-y-2">
-                    <p>文件夹内需要包含视频/图片文件，并创建 <span className="font-mono text-foreground">_READY.txt</span>。</p>
+                    <p>把一批视频/图片放入设备拷贝目录。拷贝完成后创建 <span className="font-mono text-foreground">_READY.txt</span>，扫描后才能开始导入。</p>
                     <div className={cn("rounded-[var(--skin-radius-control)] bg-[color:var(--skin-muted-bg)] p-3", skin.textDensity.metadata)}>
                       01_待导入/设备拷贝/20260508_阿阳_小院素材/_READY.txt
                     </div>
@@ -278,18 +306,43 @@ export function DeviceImportClient() {
                 <CardTitle>{folder.folderName}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className={cn("break-all", skin.typography.meta)}>{folder.relativePath} · {folder.fileCount} 个媒体文件</p>
+                <p className={cn("break-all", skin.typography.meta)}>{folder.relativePath}</p>
+                <div className={cn("grid gap-2 rounded-lg border bg-slate-50 p-3 sm:grid-cols-2", skin.typography.meta)}>
+                  <span>文件数：{folder.fileCount}</span>
+                  <span>总大小：{formatBytes(folder.totalSize)}</span>
+                  <span>最大文件：{folder.largestFile ? formatBytes(folder.largestFile.size) : "0 B"}</span>
+                  <span>_READY.txt：{folder.ready ? "已存在" : "缺失"}</span>
+                  <span>10GB+：{folder.largeFileCount}</span>
+                  <span>50GB+：{folder.hugeFileCount}</span>
+                </div>
                 {folder.isImporting ? (
                   <div className={cn("rounded-md bg-blue-50 px-2 py-1 text-blue-700", skin.typography.meta)}>
                     已在处理中{folder.importingBatchId ? `：${folder.importingBatchId}` : ""}。
                   </div>
                 ) : null}
-                <ul className={cn("thin-scrollbar max-h-32 space-y-1 overflow-auto rounded-lg border bg-slate-50 p-3", skin.typography.path)}>
-                  {folder.files.map((file) => <li key={file} className="line-clamp-2 break-all">{file}</li>)}
+                {!folder.ready ? (
+                  <div className={cn("rounded-md bg-orange-50 px-2 py-1 text-orange-700", skin.typography.meta)}>
+                    缺少 _READY.txt。请等拷贝完成后再创建标记文件。
+                  </div>
+                ) : null}
+                {folder.warnings.map((warning) => (
+                  <div key={warning} className={cn("rounded-md bg-amber-50 px-2 py-1 text-amber-800", skin.typography.meta)}>
+                    {warning}
+                  </div>
+                ))}
+                <ul className={cn("thin-scrollbar max-h-40 space-y-1 overflow-auto rounded-lg border bg-slate-50 p-3", skin.typography.path)}>
+                  {folder.sampleFiles.map((file) => (
+                    <li key={file.name} className="line-clamp-2 break-all">
+                      {file.name} · {formatBytes(file.size)}{file.huge ? " · 50GB+" : file.large ? " · 10GB+" : ""}
+                    </li>
+                  ))}
+                  {folder.fileCount > folder.sampleFiles.length ? (
+                    <li className="text-muted-foreground">另有 {folder.fileCount - folder.sampleFiles.length} 个文件未展开。</li>
+                  ) : null}
                 </ul>
-                <Button disabled={Boolean(busyFolder) || activeBatchRunning || folder.isImporting || folder.fileCount === 0} onClick={() => startImport(folder.folderName)}>
+                <Button disabled={!folder.ready || Boolean(busyFolder) || activeBatchRunning || folder.isImporting || folder.fileCount === 0} onClick={() => startImport(folder.folderName)}>
                   {busyFolder === folder.folderName ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                  {folder.isImporting ? "已在处理中" : activeBatchRunning ? "当前批次处理中" : "开始导入"}
+                  {!folder.ready ? "等待 _READY.txt" : folder.isImporting ? "已在处理中" : activeBatchRunning ? "当前批次处理中" : "开始导入"}
                 </Button>
               </CardContent>
             </Card>
@@ -376,6 +429,12 @@ function BatchStatusPanel({
 function isBatchActive(detail: BatchDetailDto | null) {
   if (!detail) return false;
   return detail.summary.queued > 0 || detail.summary.running > 0;
+}
+
+function isErrorMessage(message: string) {
+  if (!message) return false;
+  if (message.startsWith("已") || message.startsWith("正在") || message.includes("已重新加入")) return false;
+  return ["失败", "缺少", "不可", "阻止", "错误", "没有可导入"].some((keyword) => message.includes(keyword));
 }
 
 function jobStatusLabel(status: ImportJobDto["status"]) {

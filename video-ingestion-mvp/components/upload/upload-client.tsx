@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock3, CloudUpload, Loader2, UploadCloud } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, Clock3, CloudUpload, Loader2, RotateCcw, UploadCloud, XCircle } from "lucide-react";
 
 import type { MaterialDto } from "@/components/materials/types";
 import { getMaterialAspectRatio, isVerticalMaterial } from "@/components/materials/aspect-ratio";
@@ -107,9 +107,62 @@ type CategoryDto = {
   childCount?: number;
 };
 
+type UploadFileStatus = "pending" | "uploading" | "uploaded" | "failed" | "canceled";
+
+type UploadQueueItem = {
+  key: string;
+  name: string;
+  type: string;
+  size: number;
+  progress: number;
+  status: UploadFileStatus;
+  job?: UploadJobDto;
+  error?: string;
+};
+
+type FileQueueSummary = {
+  count: number;
+  totalSize: number;
+  items: UploadQueueItem[];
+  previews: UploadQueueItem[];
+  hiddenCount: number;
+  uploadedCount: number;
+};
+
+type UploadMetadataPayload = {
+  sourceType: UploadClientProps["sourceType"];
+  uploaderName: string;
+  shooterId: string;
+  shooterName: string;
+  categoryId: string;
+  rootCategory: UploadRootCategory;
+  subCategory: string;
+  customTags: string;
+  notes: string;
+  manualAssetType: string;
+  fileCount?: number;
+  totalSize?: number;
+};
+
+const EMPTY_FILE_QUEUE: FileQueueSummary = {
+  count: 0,
+  totalSize: 0,
+  items: [],
+  previews: [],
+  hiddenCount: 0,
+  uploadedCount: 0
+};
+
+const FILE_QUEUE_PREVIEW_LIMIT = 6;
+
 export function UploadClient({ mode, sourceType }: UploadClientProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [files, setFiles] = useState<File[]>([]);
+  const filesRef = useRef<Map<string, File>>(new Map());
+  const itemsRef = useRef<UploadQueueItem[]>([]);
+  const xhrsRef = useRef<Map<string, XMLHttpRequest>>(new Map());
+  const uploadMetadataRef = useRef<UploadMetadataPayload | null>(null);
+  const [uploadItems, setUploadItems] = useState<UploadQueueItem[]>([]);
+  const [activeUploadBatchId, setActiveUploadBatchId] = useState("");
   const [shooters, setShooters] = useState<ShooterDto[]>([]);
   const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [shooterId, setShooterId] = useState("");
@@ -130,8 +183,7 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [recent, setRecent] = useState<MaterialDto[]>([]);
   const [recentBatches, setRecentBatches] = useState<RecentBatchDto[]>([]);
-
-  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+  const fileQueue = useMemo(() => summarizeUploadItems(uploadItems), [uploadItems]);
 
   async function loadRecent() {
     const response = await fetch("/api/materials", { cache: "no-store" });
@@ -257,61 +309,238 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
   }
 
   function appendFiles(nextFiles: FileList | File[]) {
+    const incomingItems: UploadQueueItem[] = [];
+
+    for (let index = 0; index < nextFiles.length; index += 1) {
+      const file = nextFiles[index];
+      if (!file) continue;
+
+      const item = toUploadQueueItem(file);
+      filesRef.current.set(item.key, file);
+      incomingItems.push(item);
+    }
+
+    if (incomingItems.length === 0) return;
     setResult(null);
     setError("");
-    setFiles((current) => [...current, ...Array.from(nextFiles)]);
+    setProgress(0);
+    const nextItems = [...itemsRef.current, ...incomingItems];
+    itemsRef.current = nextItems;
+    setUploadItems(nextItems);
   }
 
-  function upload() {
-    if (files.length === 0) {
+  const clearSelectedFiles = useCallback(() => {
+    for (const xhr of xhrsRef.current.values()) xhr.abort();
+    xhrsRef.current.clear();
+    filesRef.current.clear();
+    uploadMetadataRef.current = null;
+    itemsRef.current = [];
+    setUploadItems([]);
+    setActiveUploadBatchId("");
+    if (inputRef.current) inputRef.current.value = "";
+  }, []);
+
+  async function upload() {
+    const selectedItems = itemsRef.current.filter((item) => item.status === "pending");
+    if (selectedItems.length === 0) {
       setError("请选择至少一个视频或图片。");
       return;
     }
 
-    const formData = new FormData();
-    for (const file of files) formData.append("files", file);
-    formData.append("sourceType", sourceType);
-    formData.append("uploaderName", shooterName);
-    formData.append("shooterId", shooterId);
-    formData.append("shooterName", shooterName);
-    formData.append("categoryId", categoryId);
-    formData.append("rootCategory", rootCategory);
-    formData.append("subCategory", subCategory);
-    formData.append("customTags", customTags);
-    formData.append("notes", notes);
-    formData.append("manualAssetType", mode === "desktop" ? manualAssetType : "AUTO");
-
-    const xhr = new XMLHttpRequest();
     setIsUploading(true);
-    setProgress(0);
+    setProgress(calculateAggregateProgress(itemsRef.current));
     setError("");
-    xhr.open("POST", "/api/upload");
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) setProgress(Math.round((event.loaded / event.total) * 100));
-    };
-    xhr.onload = () => {
+
+    try {
+      const metadata = uploadMetadataRef.current || buildUploadMetadata();
+      uploadMetadataRef.current = metadata;
+      const batchId = activeUploadBatchId || await createUploadBatch(metadata);
+      setActiveUploadBatchId(batchId);
+      setResult((current) => current || {
+        batchId,
+        message: "批次已创建，正在逐个接收文件。",
+        acceptedCount: 0,
+        importedCount: 0,
+        failedCount: 0,
+        jobs: [],
+        materials: []
+      });
+
+      await runUploadQueue(batchId, selectedItems.map((item) => item.key), mode === "mobile" ? 1 : 2, metadata);
+      const latestItems = itemsRef.current;
+      const failedCount = latestItems.filter((item) => item.status === "failed" || item.status === "canceled").length;
+      const uploadedCount = latestItems.filter((item) => item.status === "uploaded").length;
+
+      if (failedCount === 0 && uploadedCount === latestItems.length) {
+        await completeUploadBatch(batchId);
+      } else {
+        setError(`有 ${failedCount} 个文件未接收。可重试单个文件，或结束批次仅处理已接收的 ${uploadedCount} 个文件。`);
+        await refreshBatch(batchId);
+      }
+    } catch (error) {
+      setError((error as Error).message || "上传失败，请检查文件和服务日志。");
+    } finally {
       setIsUploading(false);
-      try {
-        const payload = JSON.parse(xhr.responseText) as UploadResult & { error?: string };
-        if (xhr.status >= 400) {
-          setError(payload.error || "上传失败，请检查文件和服务日志。");
+      setProgress(calculateAggregateProgress(itemsRef.current));
+    }
+  }
+
+  async function createUploadBatch(metadata: UploadMetadataPayload) {
+    const items = itemsRef.current;
+    const response = await fetch("/api/upload-batches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...metadata,
+        fileCount: items.length,
+        totalSize: items.reduce((sum, item) => sum + item.size, 0)
+      })
+    });
+    const data = await response.json().catch(() => null) as { batchId?: string; error?: string } | null;
+    if (!response.ok || !data?.batchId) {
+      throw new Error(data?.error || "创建上传批次失败。");
+    }
+    return data.batchId;
+  }
+
+  async function runUploadQueue(batchId: string, itemKeys: string[], concurrency: number, metadata: UploadMetadataPayload) {
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < itemKeys.length) {
+        const itemKey = itemKeys[nextIndex];
+        nextIndex += 1;
+        if (!itemKey) continue;
+        await uploadSingleFile(batchId, itemKey, metadata);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, itemKeys.length) }, () => worker()));
+  }
+
+  function uploadSingleFile(batchId: string, itemKey: string, metadata = uploadMetadataRef.current || buildUploadMetadata()) {
+    const file = filesRef.current.get(itemKey);
+    const item = itemsRef.current.find((entry) => entry.key === itemKey);
+    if (!file || !item || item.status === "uploaded" || item.status === "canceled") return Promise.resolve();
+
+    const formData = new FormData();
+    formData.append("file", file);
+    appendUploadMetadata(formData, metadata);
+
+    updateUploadItem(itemKey, { status: "uploading", progress: 0, error: undefined });
+
+    return new Promise<void>((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhrsRef.current.set(itemKey, xhr);
+      xhr.open("POST", `/api/upload-batches/${encodeURIComponent(batchId)}/files`);
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable) return;
+        const nextProgress = Math.round((event.loaded / event.total) * 100);
+        updateUploadItem(itemKey, { progress: nextProgress });
+        setProgress(calculateAggregateProgress(itemsRef.current));
+      };
+      xhr.onload = () => {
+        xhrsRef.current.delete(itemKey);
+        const payload = parseJson(xhr.responseText) as { job?: UploadJobDto; error?: string } | null;
+        if (xhr.status >= 400 || !payload?.job) {
+          updateUploadItem(itemKey, {
+            status: "failed",
+            progress: 0,
+            error: payload?.error || "文件上传失败。"
+          });
+          resolve();
           return;
         }
-        setResult({ ...payload, message: "文件已接收，后台入库正在继续处理" });
-        setFiles([]);
-        setProgress(100);
-        if (inputRef.current) inputRef.current.value = "";
-        loadRecent().catch(() => undefined);
-        loadRecentBatches().catch(() => undefined);
-      } catch {
-        setError("上传接口返回异常。");
-      }
+        const uploadedJob = payload.job;
+        updateUploadItem(itemKey, { status: "uploaded", progress: 100, job: uploadedJob, error: undefined });
+        setResult((current) => mergeUploadedJobResult(current, batchId, uploadedJob));
+        resolve();
+      };
+      xhr.onerror = () => {
+        xhrsRef.current.delete(itemKey);
+        updateUploadItem(itemKey, { status: "failed", progress: 0, error: "网络中断，文件上传失败。" });
+        resolve();
+      };
+      xhr.onabort = () => {
+        xhrsRef.current.delete(itemKey);
+        updateUploadItem(itemKey, { status: "canceled", progress: 0, error: "已取消上传。" });
+        resolve();
+      };
+      xhr.send(formData);
+    });
+  }
+
+  async function completeUploadBatch(batchId = activeUploadBatchId) {
+    if (!batchId) return;
+    setError("");
+    const response = await fetch(`/api/upload-batches/${encodeURIComponent(batchId)}/complete`, { method: "POST" });
+    const data = await response.json().catch(() => null) as (UploadResult & { error?: string }) | null;
+    if (!response.ok || !data) {
+      setError(data?.error || "结束上传批次失败。");
+      return;
+    }
+    setResult({ ...data, message: "文件已接收，后台入库正在继续处理" });
+    setProgress(100);
+    setActiveUploadBatchId("");
+    uploadMetadataRef.current = null;
+    loadRecent().catch(() => undefined);
+    loadRecentBatches().catch(() => undefined);
+    refreshBatch(batchId).catch(() => undefined);
+  }
+
+  async function retryUploadItem(itemKey: string) {
+    const batchId = activeUploadBatchId || result?.batchId;
+    if (!batchId) {
+      setError("请先点击上传创建批次。");
+      return;
+    }
+    setIsUploading(true);
+    setError("");
+    updateUploadItem(itemKey, { status: "pending", progress: 0, error: undefined });
+    await uploadSingleFile(batchId, itemKey);
+    setIsUploading(false);
+    setProgress(calculateAggregateProgress(itemsRef.current));
+    const latestItems = itemsRef.current;
+    if (latestItems.length > 0 && latestItems.every((item) => item.status === "uploaded")) {
+      await completeUploadBatch(batchId);
+    }
+  }
+
+  function cancelUploadItem(itemKey: string) {
+    const xhr = xhrsRef.current.get(itemKey);
+    if (xhr) {
+      xhr.abort();
+      return;
+    }
+    updateUploadItem(itemKey, { status: "canceled", progress: 0, error: "已取消上传。" });
+  }
+
+  function updateUploadItem(itemKey: string, patch: Partial<UploadQueueItem>) {
+    const next = itemsRef.current.map((item) => (
+      item.key === itemKey ? { ...item, ...patch } : item
+    ));
+    itemsRef.current = next;
+    setUploadItems(next);
+  }
+
+  function buildUploadMetadata(extra?: { fileCount?: number; totalSize?: number }): UploadMetadataPayload {
+    return {
+      sourceType,
+      uploaderName: shooterName,
+      shooterId,
+      shooterName,
+      categoryId,
+      rootCategory,
+      subCategory,
+      customTags,
+      notes,
+      manualAssetType: mode === "desktop" ? manualAssetType : "AUTO",
+      ...extra
     };
-    xhr.onerror = () => {
-      setIsUploading(false);
-      setError("网络中断，上传失败。");
-    };
-    xhr.send(formData);
+  }
+
+  function appendUploadMetadata(formData: FormData, metadata: UploadMetadataPayload) {
+    for (const [key, value] of Object.entries(metadata)) {
+      formData.append(key, String(value));
+    }
   }
 
   async function quickAddShooter() {
@@ -443,12 +672,12 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
         <p className={skin.typography.sectionTitle}>{mode === "mobile" ? "点击选择视频或图片" : "拖拽文件到这里"}</p>
         <p className={cn("mt-1 max-w-2xl", skin.typography.body, "text-muted-foreground")}>支持 MP4、MOV、JPG、PNG 等。视频只抽关键帧，不把完整视频发给 AI。</p>
         <Input ref={inputRef} className="mt-5 min-h-[var(--skin-touch-target-min-height)] max-w-md cursor-pointer bg-[color:var(--skin-surface-input)]" type="file" accept="video/*,image/*" multiple onChange={(event) => event.target.files && appendFiles(event.target.files)} />
-        {files.length ? (
+        {fileQueue.count ? (
           <p className={cn("mt-3", skin.typography.meta)}>
-            已选择 {files.length} 个文件，共 {formatBytes(totalSize)}。
+            已选择 {fileQueue.count} 个文件，共 {formatBytes(fileQueue.totalSize)}。
           </p>
         ) : null}
-        <Button className={cn("mt-4 max-w-md", skin.responsive.uploadPrimaryAction)} size="lg" disabled={isUploading} onClick={upload}>
+        <Button className={cn("mt-4 max-w-md", skin.responsive.uploadPrimaryAction)} size="lg" disabled={isUploading || fileQueue.count === 0} onClick={upload}>
           {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-4 w-4" />}
           {isUploading ? `正在${terms.upload.noun}...` : `${terms.upload.noun}到待${terms.ingestion.noun}队列`}
         </Button>
@@ -499,6 +728,7 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
                 setResult(null);
                 setProgress(0);
                 setError("");
+                clearSelectedFiles();
               }}
             />
           ) : null}
@@ -506,7 +736,17 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
       ) : null}
 
       <div className={mode === "desktop" ? skin.responsive.uploadTaskGrid : "space-y-4"}>
-        <FileQueuePanel files={files} isUploading={isUploading} progress={progress} totalSize={totalSize} mode={mode} />
+        <FileQueuePanel
+          queue={fileQueue}
+          isUploading={isUploading}
+          progress={progress}
+          mode={mode}
+          canComplete={Boolean(activeUploadBatchId) && fileQueue.uploadedCount > 0}
+          onClear={clearSelectedFiles}
+          onCancel={cancelUploadItem}
+          onRetry={retryUploadItem}
+          onComplete={() => completeUploadBatch()}
+        />
         <RecentBatchesPanel batches={recentBatches} onOpen={openBatch} compact={mode === "mobile" && Boolean(result)} />
       </div>
 
@@ -523,6 +763,70 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
       ) : null}
     </div>
   );
+}
+
+function toUploadQueueItem(file: File): UploadQueueItem {
+  return {
+    key: `${crypto.randomUUID()}-${file.name}-${file.size}-${file.lastModified}`,
+    name: file.name,
+    type: file.type,
+    size: file.size,
+    progress: 0,
+    status: "pending"
+  };
+}
+
+function summarizeUploadItems(items: UploadQueueItem[]): FileQueueSummary {
+  const previews = items.slice(0, FILE_QUEUE_PREVIEW_LIMIT);
+  let totalSize = 0;
+  let uploadedCount = 0;
+  for (const item of items) {
+    totalSize += item.size;
+    if (item.status === "uploaded") uploadedCount += 1;
+  }
+  return {
+    count: items.length,
+    totalSize,
+    items,
+    previews,
+    hiddenCount: Math.max(0, items.length - previews.length),
+    uploadedCount
+  };
+}
+
+function calculateAggregateProgress(items: UploadQueueItem[]) {
+  if (items.length === 0) return 0;
+  const totalSize = items.reduce((sum, item) => sum + item.size, 0);
+  if (totalSize === 0) return 0;
+  const loadedSize = items.reduce((sum, item) => {
+    const progress = item.status === "uploaded" ? 100 : item.progress;
+    return sum + (item.size * progress) / 100;
+  }, 0);
+  return Math.round((loadedSize / totalSize) * 100);
+}
+
+function parseJson(text: string) {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function mergeUploadedJobResult(current: UploadResult | null, batchId: string, job: UploadJobDto): UploadResult {
+  const jobs = current?.jobs?.filter((item) => item.jobId !== job.jobId) || [];
+  const nextJobs = [...jobs, job];
+  return {
+    batchId,
+    message: "文件正在逐个接收。",
+    acceptedCount: nextJobs.length,
+    importedCount: current?.importedCount ?? 0,
+    failedCount: current?.failedCount ?? 0,
+    batch: current?.batch,
+    summary: current?.summary,
+    jobs: nextJobs,
+    materials: current?.materials || []
+  };
 }
 
 function SectionHeading({ title, description }: { title: string; description?: string }) {
@@ -653,36 +957,58 @@ function SummaryGrid({ summary }: { summary?: BatchSummaryDto }) {
   );
 }
 
-function FileQueuePanel({
-  files,
+const FileQueuePanel = memo(function FileQueuePanel({
+  queue,
   isUploading,
   progress,
-  totalSize,
-  mode
+  mode,
+  canComplete,
+  onClear,
+  onCancel,
+  onRetry,
+  onComplete
 }: {
-  files: File[];
+  queue: FileQueueSummary;
   isUploading: boolean;
   progress: number;
-  totalSize: number;
   mode: "mobile" | "desktop";
+  canComplete: boolean;
+  onClear: () => void;
+  onCancel: (itemKey: string) => void;
+  onRetry: (itemKey: string) => void;
+  onComplete: () => void;
 }) {
+  const hasFiles = queue.count > 0;
+
   return (
     <Panel padding="none" className="overflow-hidden">
       <div className="flex flex-col gap-2 border-b border-[color:var(--skin-border-subtle)] p-[var(--skin-panel-padding)] sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className={skin.typography.panelTitle}>{mode === "mobile" ? "待上传文件" : terms.upload.fileList}</h2>
           <p className={cn("mt-1", skin.typography.meta)}>
-            {files.length > 0 ? "这里显示浏览器已选择的文件，点击上传后才会进入本机待处理区。" : "选择视频或图片后，文件会先在这里排队。"}
+            {hasFiles ? "这里显示浏览器已选择的文件，点击上传后才会进入本机待处理区。" : "选择视频或图片后，文件会先在这里排队。"}
           </p>
         </div>
-        {files.length > 0 ? <StatusPill tone="info">{files.length} 个 · {formatBytes(totalSize)}</StatusPill> : null}
+        {hasFiles ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill tone="info">{queue.count} 个 · {formatBytes(queue.totalSize)}</StatusPill>
+            <Button type="button" variant="secondary" size="sm" disabled={isUploading} onClick={onClear}>
+              清空已选
+            </Button>
+            {canComplete ? (
+              <Button type="button" variant="secondary" size="sm" disabled={isUploading} onClick={onComplete}>
+                结束批次
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <div className="p-[var(--skin-panel-padding)]">
-        {files.length > 0 ? (
+        {hasFiles ? (
           mode === "mobile" ? (
             <div className="space-y-2">
-              {files.map((file, index) => (
-                <div key={`${file.name}-${index}`} className={cn(skin.listItem, "p-3")}>
+              {queue.previews.map((file) => (
+                <div key={file.key} className={cn(skin.listItem, "p-3")}>
                   <div className="flex min-w-0 items-start gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--skin-radius-control)] bg-[color:var(--skin-surface-subtle)] text-muted-foreground">
                       <FileTypeIcon type={fileTypeFromMime(file.type)} className="h-4 w-4" />
@@ -691,13 +1017,20 @@ function FileQueuePanel({
                       <p className={cn("line-clamp-2 break-words font-medium", skin.typography.cardTitle)}>{file.name}</p>
                       <div className={cn("mt-2 flex flex-wrap items-center gap-2", skin.typography.meta)}>
                         <span>{formatBytes(file.size)}</span>
-                        <StatusPill tone={isUploading ? "processing" : "neutral"}>{isUploading ? `上传中 ${progress}%` : "等待上传"}</StatusPill>
+                        <StatusPill tone={uploadFileStatusTone(file.status)}>{uploadFileStatusLabel(file.status, file.progress)}</StatusPill>
                       </div>
+                      {file.error ? <p className={cn("mt-2 text-red-700", skin.typography.meta)}>{file.error}</p> : null}
                     </div>
                   </div>
-                  {isUploading ? <div className="mt-3"><ProgressBar value={progress} compact /></div> : null}
+                  <div className="mt-3"><ProgressBar value={file.progress} compact /></div>
+                  <FileUploadActions item={file} isUploading={isUploading} onCancel={onCancel} onRetry={onRetry} />
                 </div>
               ))}
+              {queue.hiddenCount > 0 ? (
+                <Surface tone="muted" padding="sm" className={cn("text-center", skin.typography.meta)}>
+                  还有 {queue.hiddenCount} 个文件已加入队列，上传时会继续逐个处理。
+                </Surface>
+              ) : null}
             </div>
           ) : (
             <ResponsiveTableShell>
@@ -711,20 +1044,35 @@ function FileQueuePanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {files.map((file, index) => (
-                    <tr key={`${file.name}-${index}`} className={skin.table.row}>
+                  {queue.previews.map((file) => (
+                    <tr key={file.key} className={skin.table.row}>
                       <td className="max-w-[360px] px-3 py-2"><span className="line-clamp-2 break-all">{file.name}</span></td>
                       <td className={cn("whitespace-nowrap px-3 py-2", skin.typography.meta)}>{formatBytes(file.size)}</td>
-                      <td className={cn("whitespace-nowrap px-3 py-2", skin.typography.meta)}>{isUploading ? `${progress}%` : "0%"}</td>
+                      <td className="min-w-[140px] px-3 py-2">
+                        <ProgressBar value={file.progress} compact />
+                        <p className={cn("mt-1", skin.typography.meta)}>{file.progress}%</p>
+                      </td>
                       <td className="px-3 py-2">
-                        <StatusPill tone={isUploading ? "processing" : "neutral"}>{isUploading ? "上传中" : "等待中"}</StatusPill>
+                        <div className="flex flex-col gap-2">
+                          <StatusPill tone={uploadFileStatusTone(file.status)}>{uploadFileStatusLabel(file.status, file.progress)}</StatusPill>
+                          {file.error ? <span className={cn("text-red-700", skin.typography.meta)}>{file.error}</span> : null}
+                          <FileUploadActions item={file} isUploading={isUploading} onCancel={onCancel} onRetry={onRetry} />
+                        </div>
                       </td>
                     </tr>
                   ))}
+                  {queue.hiddenCount > 0 ? (
+                    <tr className={skin.table.row}>
+                      <td colSpan={4} className={cn("px-3 py-3 text-center", skin.typography.meta)}>
+                        还有 {queue.hiddenCount} 个文件已加入队列，上传时会继续逐个处理。
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
               <div className={cn("border-t border-[color:var(--skin-border-subtle)] bg-[color:var(--skin-surface-table-header)] px-3 py-2", skin.typography.meta)}>
-                共 {files.length} 个文件，{formatBytes(totalSize)}
+                共 {queue.count} 个文件，{formatBytes(queue.totalSize)}
+                {hasFiles ? `；总体上传 ${progress}%` : ""}
               </div>
             </ResponsiveTableShell>
           )
@@ -739,6 +1087,52 @@ function FileQueuePanel({
       </div>
     </Panel>
   );
+});
+
+function FileUploadActions({
+  item,
+  isUploading,
+  onCancel,
+  onRetry
+}: {
+  item: UploadQueueItem;
+  isUploading: boolean;
+  onCancel: (itemKey: string) => void;
+  onRetry: (itemKey: string) => void;
+}) {
+  if (item.status === "uploaded") return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {item.status === "uploading" || item.status === "pending" ? (
+        <Button type="button" variant="secondary" size="sm" onClick={() => onCancel(item.key)}>
+          <XCircle className="mr-1.5 h-3.5 w-3.5" />
+          取消
+        </Button>
+      ) : null}
+      {item.status === "failed" || item.status === "canceled" ? (
+        <Button type="button" variant="secondary" size="sm" disabled={isUploading} onClick={() => onRetry(item.key)}>
+          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+          重试
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function uploadFileStatusLabel(status: UploadFileStatus, progress: number) {
+  if (status === "uploading") return `上传中 ${progress}%`;
+  if (status === "uploaded") return "已接收";
+  if (status === "failed") return "上传失败";
+  if (status === "canceled") return "已取消";
+  return "等待上传";
+}
+
+function uploadFileStatusTone(status: UploadFileStatus): SkinStatusTone {
+  if (status === "uploading") return "processing";
+  if (status === "uploaded") return "success";
+  if (status === "failed") return "danger";
+  if (status === "canceled") return "warning";
+  return "neutral";
 }
 
 function JobGroup({

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { ImportBatch, IngestionJob, Material } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { byteSizeToSafeNumber, toJsonSafe } from "@/lib/serialization/bigint-json";
 import { ingestionQueueService } from "@/modules/ingestion/ingestion-queue.service";
 
 export const runtime = "nodejs";
@@ -74,13 +75,13 @@ export async function GET(_request: Request, context: { params: Promise<{ batchI
     })
   ]);
 
-  return NextResponse.json({
+  return NextResponse.json(toJsonSafe({
     batch,
     summary: buildBatchSummary(batch, jobs, materials),
     jobs: jobs.map((job) => ({
       jobId: job.id,
       originalFileName: job.originalFileName,
-      fileSize: job.fileSize,
+      fileSize: byteSizeToSafeNumber(job.fileSize),
       sourceType: job.sourceType,
       incomingRelativePath: job.incomingRelativePath,
       status: job.status,
@@ -92,5 +93,5 @@ export async function GET(_request: Request, context: { params: Promise<{ batchI
       completedAt: job.completedAt
     })),
     materials
-  });
+  }));
 }

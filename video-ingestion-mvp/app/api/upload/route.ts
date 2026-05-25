@@ -4,6 +4,7 @@ import type { SourceType } from "@prisma/client";
 
 import { MAX_UPLOAD_BYTES } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
+import { byteSizeToBigInt, byteSizeToSafeNumber, toJsonSafe } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
 import { getDefaultWorkspaceContext } from "@/lib/workspace/default-workspace.service";
 import { type ManualAssetType } from "@/modules/ingestion/ingestion.pipeline";
@@ -12,6 +13,8 @@ import { normalizeCustomTags } from "@/modules/ingestion/ingest-taxonomy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const LEGACY_UPLOAD_OVERHEAD_LIMIT_BYTES = 16 * 1024 * 1024;
 
 function isSourceType(value: FormDataEntryValue | null): value is SourceType {
   return (
@@ -28,6 +31,13 @@ function isManualAssetType(value: FormDataEntryValue | null): value is ManualAss
 }
 
 export async function POST(request: Request) {
+  const contentLength = readContentLength(request);
+  if (contentLength > MAX_UPLOAD_BYTES + LEGACY_UPLOAD_OVERHEAD_LIMIT_BYTES) {
+    return NextResponse.json({
+      error: "旧版批量上传接口单次请求超过 1GB 上限。请使用页面逐文件上传；10GB+/50GB+ 原片请使用本地/NAS/设备目录导入。"
+    }, { status: 413 });
+  }
+
   await storageService.initializeStorage();
   const form = await request.formData();
   const files = form.getAll("files").filter((value): value is File => value instanceof File);
@@ -88,7 +98,7 @@ export async function POST(request: Request) {
       sourceType,
       uploaderName,
       fileCount: files.length,
-      totalSize: files.reduce((sum, file) => sum + file.size, 0),
+      totalSize: byteSizeToBigInt(files.reduce((sum, file) => sum + file.size, 0)),
       status: "PROCESSING",
       notes
     }
@@ -109,7 +119,7 @@ export async function POST(request: Request) {
           sourceType,
           incomingRelativePath,
           originalFileName: file.name,
-          fileSize: file.size,
+          fileSize: byteSizeToBigInt(file.size),
           mimeType: file.type || null,
           uploaderName,
           shooterId,
@@ -127,7 +137,7 @@ export async function POST(request: Request) {
       jobs.push({
         jobId: job.id,
         originalFileName: job.originalFileName,
-        fileSize: job.fileSize,
+        fileSize: byteSizeToSafeNumber(job.fileSize),
         sourceType: job.sourceType,
         incomingRelativePath: job.incomingRelativePath,
         status: job.status,
@@ -147,7 +157,7 @@ export async function POST(request: Request) {
     });
   }
 
-  return NextResponse.json({
+  return NextResponse.json(toJsonSafe({
     batchId,
     message: "文件已上传，后台正在 AI 入库。",
     acceptedCount: jobs.length,
@@ -156,5 +166,10 @@ export async function POST(request: Request) {
     jobs,
     materials: [],
     errors
-  });
+  }));
+}
+
+function readContentLength(request: Request) {
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  return Number.isFinite(contentLength) && contentLength > 0 ? contentLength : 0;
 }

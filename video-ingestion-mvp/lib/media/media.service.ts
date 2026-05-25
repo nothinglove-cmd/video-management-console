@@ -6,13 +6,39 @@ import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 
 const execFileAsync = promisify(execFile);
+const FFMPEG_VERSION_TIMEOUT_MS = 5000;
+const FFPROBE_TIMEOUT_MS = 45000;
+const FRAME_TIMEOUT_MS = 30000;
+const THUMBNAIL_TIMEOUT_MS = 30000;
+const PREVIEW_TIMEOUT_MS = 300000;
+const LARGE_MEDIA_BYTES = 10 * 1024 ** 3;
+const HUGE_MEDIA_BYTES = 50 * 1024 ** 3;
+const LONG_VIDEO_SECONDS = 2 * 60 * 60;
+const VERY_LONG_VIDEO_SECONDS = 6 * 60 * 60;
+const FOUR_K_SHORT_EDGE = 2160;
+const HIGH_FRAME_RATE = 50;
 
 export type MediaInfo = {
   duration: number | null;
   width: number | null;
   height: number | null;
+  frameRate: number | null;
   orientation: "vertical" | "horizontal" | "square" | "unknown";
   isImage: boolean;
+  warnings: string[];
+};
+
+export type MediaProcessingProfile = {
+  fileSize: number | null;
+  large: boolean;
+  huge: boolean;
+  long: boolean;
+  veryLong: boolean;
+  ultraHighResolution: boolean;
+  highFrameRate: boolean;
+  fourK60: boolean;
+  maxKeyFrames: number;
+  skipPreviewMp4: boolean;
   warnings: string[];
 };
 
@@ -31,6 +57,8 @@ type FfprobeStream = {
   width?: number;
   height?: number;
   duration?: string;
+  avg_frame_rate?: string;
+  r_frame_rate?: string;
   tags?: Record<string, string>;
   side_data_list?: Array<{ rotation?: number }>;
 };
@@ -44,7 +72,7 @@ const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".h
 
 async function binaryAvailable(binaryName: string) {
   try {
-    await execFileAsync(binaryName, ["-version"], { timeout: 5000 });
+    await execFileAsync(binaryName, ["-version"], { timeout: FFMPEG_VERSION_TIMEOUT_MS });
     return true;
   } catch {
     return false;
@@ -63,12 +91,35 @@ function parseDuration(value?: string) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-function uniqueTimes(times: number[], duration: number) {
+function parseFrameRate(value?: string) {
+  if (!value || value === "0/0") return null;
+  const [numerator, denominator] = value.split("/").map(Number);
+  const parsed = denominator ? numerator / denominator : Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function uniqueTimes(times: number[], duration: number, maxFrames = 8) {
   const clamped = times
     .map((time) => Math.max(0, Math.min(time, Math.max(duration - 0.2, 0))))
     .map((time) => Number(time.toFixed(2)));
 
-  return Array.from(new Set(clamped)).slice(0, 8);
+  return Array.from(new Set(clamped)).slice(0, maxFrames);
+}
+
+function isLargeMedia(fileSize?: number | null) {
+  return typeof fileSize === "number" && fileSize >= LARGE_MEDIA_BYTES;
+}
+
+function isHugeMedia(fileSize?: number | null) {
+  return typeof fileSize === "number" && fileSize >= HUGE_MEDIA_BYTES;
+}
+
+function isLongVideo(duration?: number | null) {
+  return typeof duration === "number" && duration >= LONG_VIDEO_SECONDS;
+}
+
+function isVeryLongVideo(duration?: number | null) {
+  return typeof duration === "number" && duration >= VERY_LONG_VIDEO_SECONDS;
 }
 
 export class MediaService {
@@ -98,6 +149,7 @@ export class MediaService {
         duration: isImage ? 0 : null,
         width: null,
         height: null,
+        frameRate: null,
         orientation: "unknown",
         isImage,
         warnings
@@ -105,15 +157,19 @@ export class MediaService {
     }
 
     try {
-      const { stdout } = await execFileAsync("ffprobe", [
-        "-v",
-        "error",
-        "-print_format",
-        "json",
-        "-show_format",
-        "-show_streams",
-        filePath
-      ]);
+      const { stdout } = await execFileAsync(
+        "ffprobe",
+        [
+          "-v",
+          "error",
+          "-print_format",
+          "json",
+          "-show_format",
+          "-show_streams",
+          filePath
+        ],
+        { timeout: FFPROBE_TIMEOUT_MS }
+      );
       const probed = JSON.parse(stdout) as FfprobeResult;
       const stream = probed.streams?.find((item) => item.codec_type === "video") ?? probed.streams?.[0];
       const rotation =
@@ -128,16 +184,18 @@ export class MediaService {
         duration: parseDuration(probed.format?.duration) ?? parseDuration(stream?.duration) ?? (isImage ? 0 : null),
         width,
         height,
+        frameRate: parseFrameRate(stream?.avg_frame_rate) ?? parseFrameRate(stream?.r_frame_rate),
         orientation: getOrientation(width, height),
         isImage,
         warnings
       };
     } catch (error) {
-      warnings.push(`ffprobe 读取失败：${(error as Error).message}`);
+      warnings.push(`ffprobe 读取失败或超时：${(error as Error).message}`);
       return {
         duration: isImage ? 0 : null,
         width: null,
         height: null,
+        frameRate: null,
         orientation: "unknown",
         isImage,
         warnings
@@ -145,34 +203,73 @@ export class MediaService {
     }
   }
 
-  getFrameTimes(duration: number | null, isImage: boolean) {
+  getProcessingProfile(params: { fileSize?: number | null; mediaInfo: MediaInfo }): MediaProcessingProfile {
+    const fileSize = Number.isFinite(params.fileSize ?? NaN) ? params.fileSize ?? null : null;
+    const width = params.mediaInfo.width ?? 0;
+    const height = params.mediaInfo.height ?? 0;
+    const longEdge = Math.max(width, height);
+    const shortEdge = Math.min(width, height);
+    const large = isLargeMedia(fileSize);
+    const huge = isHugeMedia(fileSize);
+    const long = isLongVideo(params.mediaInfo.duration);
+    const veryLong = isVeryLongVideo(params.mediaInfo.duration);
+    const ultraHighResolution = longEdge >= 3840 || shortEdge >= FOUR_K_SHORT_EDGE;
+    const highFrameRate = Boolean(params.mediaInfo.frameRate && params.mediaInfo.frameRate >= HIGH_FRAME_RATE);
+    const fourK60 = ultraHighResolution && highFrameRate;
+    const maxKeyFrames = huge || veryLong ? 2 : large || long || fourK60 ? 4 : 8;
+    const skipPreviewMp4 = huge || veryLong;
+    const warnings: string[] = [];
+
+    if (large) warnings.push(`大文件降级：10GB+ 原始文件最多抽取 ${maxKeyFrames} 帧。`);
+    if (long) warnings.push(`长视频降级：2 小时以上视频最多抽取 ${maxKeyFrames} 帧。`);
+    if (fourK60) warnings.push(`高规格视频降级：4K/高帧率视频最多抽取 ${maxKeyFrames} 帧。`);
+    if (skipPreviewMp4) warnings.push("超大/超长视频降级：50GB+ 或 6 小时以上文件跳过 preview MP4。");
+
+    return {
+      fileSize,
+      large,
+      huge,
+      long,
+      veryLong,
+      ultraHighResolution,
+      highFrameRate,
+      fourK60,
+      maxKeyFrames,
+      skipPreviewMp4,
+      warnings
+    };
+  }
+
+  getFrameTimes(duration: number | null, isImage: boolean, maxFrames = 8) {
     if (isImage) return [0];
     const safeDuration = duration && duration > 0 ? duration : 1;
 
     if (safeDuration <= 10) {
-      return uniqueTimes([1, safeDuration / 2, Math.max(safeDuration - 1, 0)], safeDuration);
+      return uniqueTimes([1, safeDuration / 2, Math.max(safeDuration - 1, 0)], safeDuration, maxFrames);
     }
 
     if (safeDuration <= 60) {
       return uniqueTimes(
         [2, safeDuration * 0.25, safeDuration * 0.5, safeDuration * 0.75, Math.max(safeDuration - 2, 0)],
-        safeDuration
+        safeDuration,
+        maxFrames
       );
     }
 
-    const interval = Math.min(15, Math.max(10, safeDuration / 7));
+    const interval = Math.min(60, Math.max(10, safeDuration / Math.max(maxFrames - 1, 1)));
     const times: number[] = [];
-    for (let time = 2; time < safeDuration - 2 && times.length < 8; time += interval) {
+    for (let time = 2; time < safeDuration - 2 && times.length < maxFrames; time += interval) {
       times.push(time);
     }
-    if (times.length < 8) times.push(Math.max(safeDuration - 2, 0));
-    return uniqueTimes(times, safeDuration);
+    if (times.length < maxFrames) times.push(Math.max(safeDuration - 2, 0));
+    return uniqueTimes(times, safeDuration, maxFrames);
   }
 
   async extractKeyFrames(params: {
     filePath: string;
     mediaInfo: MediaInfo;
     outputDirectory: string;
+    fileSize?: number | null;
   }): Promise<FrameExtractionResult> {
     const warnings: string[] = [...params.mediaInfo.warnings];
     await fs.mkdir(params.outputDirectory, { recursive: true });
@@ -182,7 +279,12 @@ export class MediaService {
       return { frames: [], warnings };
     }
 
-    const frameTimes = this.getFrameTimes(params.mediaInfo.duration, params.mediaInfo.isImage);
+    const profile = this.getProcessingProfile({
+      fileSize: params.fileSize,
+      mediaInfo: params.mediaInfo
+    });
+    if (!params.mediaInfo.isImage) warnings.push(...profile.warnings);
+    const frameTimes = this.getFrameTimes(params.mediaInfo.duration, params.mediaInfo.isImage, profile.maxKeyFrames);
     const frames: string[] = [];
 
     for (const [index, time] of frameTimes.entries()) {
@@ -216,7 +318,7 @@ export class MediaService {
           ];
 
       try {
-        await execFileAsync("ffmpeg", args, { timeout: 30000 });
+        await execFileAsync("ffmpeg", args, { timeout: FRAME_TIMEOUT_MS });
         frames.push(outputPath);
       } catch (error) {
         warnings.push(`关键帧 ${index + 1} 抽取失败：${(error as Error).message}`);
@@ -273,7 +375,7 @@ export class MediaService {
         ];
 
     try {
-      await execFileAsync("ffmpeg", args, { timeout: 30000 });
+      await execFileAsync("ffmpeg", args, { timeout: THUMBNAIL_TIMEOUT_MS });
       return { thumbnailPath: params.outputPath, warnings };
     } catch (error) {
       warnings.push(`缩略图生成失败，但入库流程会继续：${(error as Error).message}`);
@@ -285,6 +387,7 @@ export class MediaService {
     filePath: string;
     mediaInfo: MediaInfo;
     outputPath: string;
+    fileSize?: number | null;
   }): Promise<PreviewMp4Result> {
     const warnings: string[] = [];
     await fs.mkdir(path.dirname(params.outputPath), { recursive: true });
@@ -297,6 +400,17 @@ export class MediaService {
       return {
         previewPath: null,
         warnings: ["未检测到 ffmpeg：无法生成 preview MP4，请安装 FFmpeg。"]
+      };
+    }
+
+    const profile = this.getProcessingProfile({
+      fileSize: params.fileSize,
+      mediaInfo: params.mediaInfo
+    });
+    if (profile.skipPreviewMp4) {
+      return {
+        previewPath: null,
+        warnings: [...profile.warnings, "preview MP4 已按大文件降级策略跳过，原始文件入库继续。"]
       };
     }
 
@@ -328,7 +442,7 @@ export class MediaService {
     ];
 
     try {
-      await execFileAsync("ffmpeg", args, { timeout: 300000 });
+      await execFileAsync("ffmpeg", args, { timeout: PREVIEW_TIMEOUT_MS });
       return { previewPath: params.outputPath, warnings };
     } catch (error) {
       warnings.push(`preview MP4 生成失败，但入库流程会继续：${(error as Error).message}`);

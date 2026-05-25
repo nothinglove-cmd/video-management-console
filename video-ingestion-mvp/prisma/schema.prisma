@@ -317,7 +317,7 @@ model ImportBatch {
   sourceType   SourceType
   uploaderName String?
   fileCount    Int
-  totalSize    Int
+  totalSize    BigInt
   status       BatchStatus  @default(UPLOADING)
   notes        String?
   createdAt    DateTime     @default(now())
@@ -436,7 +436,7 @@ model Material {
   relativePath      String
   absolutePath      String
   thumbnailPath     String?
-  fileSize          Int
+  fileSize          BigInt
   mimeType          String?
   duration          Float?
   width             Int?
@@ -519,7 +519,7 @@ model IngestionJob {
   sourceType           SourceType
   incomingRelativePath String
   originalFileName     String
-  fileSize             Int
+  fileSize             BigInt
   mimeType             String?
   uploaderName         String?
   shooterId            String?
@@ -563,7 +563,7 @@ model DerivativeFile {
   absolutePath      String?
   fileName          String?
   mimeType          String?
-  fileSize          Int?
+  fileSize          BigInt?
   width             Int?
   height            Int?
   duration          Float?

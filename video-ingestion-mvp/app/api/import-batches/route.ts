@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { ImportBatch, IngestionJob, Material } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import { ingestionQueueService } from "@/modules/ingestion/ingestion-queue.service";
 
 export const runtime = "nodejs";
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
     })
   ]);
 
-  return NextResponse.json({
+  return NextResponse.json(toJsonSafe({
     batches: batches.map((batch) => {
       const batchJobs = jobs.filter((job) => job.batchId === batch.batchId);
       const batchMaterials = materials.filter((material) => material.batchId === batch.batchId);
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
         summary: buildBatchSummary(batch, batchJobs, batchMaterials)
       };
     })
-  });
+  }));
 }
 
 function buildBatchSummary(batch: ImportBatch, jobs: IngestionJob[], materials: Material[]) {

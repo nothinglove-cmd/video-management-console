@@ -4,6 +4,7 @@ import type { AssetType } from "@prisma/client";
 import { jsonError, readJson } from "@/app/api/_utils";
 import { normalizeOperatorName } from "@/lib/operator/operator-context";
 import { prisma } from "@/lib/prisma";
+import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
 import { ingestionPipeline } from "@/modules/ingestion/ingestion.pipeline";
 
@@ -62,5 +63,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ results });
+  return NextResponse.json(toJsonSafe({ results }));
 }

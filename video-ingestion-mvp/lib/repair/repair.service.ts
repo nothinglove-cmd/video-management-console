@@ -12,6 +12,7 @@ import type {
   StorageSafeFixResult
 } from "@/lib/repair/storage-audit.types";
 import { buildSearchTextFromMaterial } from "@/lib/search/material-search.service";
+import { byteSizeToBigInt } from "@/lib/serialization/bigint-json";
 import { PROCESSING_DIR } from "@/lib/storage/storage.constants";
 import { storageService } from "@/lib/storage/storage.service";
 
@@ -848,7 +849,7 @@ export async function rebuildFromMetadata() {
         relativePath: storedRelativePath,
         absolutePath: storageService.resolve(storedRelativePath),
         thumbnailPath: typeof payload.thumbnailPath === "string" ? payload.thumbnailPath : null,
-        fileSize: Number(payload.fileSize || 0),
+        fileSize: byteSizeToBigInt(Number(payload.fileSize || 0)),
         mimeType: typeof payload.mimeType === "string" ? payload.mimeType : null,
         duration: numberOrNull(payload.duration),
         width: integerOrNull(payload.width),

@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+
 import { buildUploadCategoryOptions, type UploadCategoryOptionSource } from "@/components/upload/upload-category-options";
 import { Select } from "@/components/ui/select";
 import { skin } from "@/components/theme/skin";
@@ -14,8 +16,8 @@ export function UploadCategorySelect({
   onChange: (value: string) => void;
   label: string;
 }) {
-  const options = buildUploadCategoryOptions(categories);
-  const selectedOption = options.find((option) => option.id === value);
+  const options = useMemo(() => buildUploadCategoryOptions(categories), [categories]);
+  const selectedOption = useMemo(() => options.find((option) => option.id === value), [options, value]);
 
   return (
     <label className={cn("block min-w-0 space-y-1.5 font-medium", skin.typography.body)}>

@@ -3,6 +3,7 @@ import type { AssetType } from "@prisma/client";
 
 import { getRouteId, jsonError, readJson, requireMaterial } from "@/app/api/_utils";
 import { prisma } from "@/lib/prisma";
+import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
 
 export const runtime = "nodejs";
@@ -44,7 +45,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       operatorName: body.operatorName,
       notes: body.notes
     });
-    return NextResponse.json({ material: updated });
+    return NextResponse.json(toJsonSafe({ material: updated }));
   }
 
   if (!body.assetType || !ASSET_TYPES.includes(body.assetType)) return jsonError("请选择有效素材类型。");
@@ -56,5 +57,5 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     operatorName: body.operatorName,
     notes: body.notes
   });
-  return NextResponse.json({ material: updated });
+  return NextResponse.json(toJsonSafe({ material: updated }));
 }

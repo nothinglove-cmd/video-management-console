@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
 import { buildMaterialWhere } from "@/lib/search/material-search.service";
+import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import {
   ASSET_TYPE_LABELS,
   getAllSelectableCategories
@@ -145,7 +146,7 @@ export async function GET(request: Request) {
       new Set(uploaderRows.map((item) => item.shooterName || item.uploaderName).filter((item): item is string => Boolean(item)))
     ).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
 
-    return NextResponse.json({
+    return NextResponse.json(toJsonSafe({
       materials,
       categories: getAllSelectableCategories(),
       assetTypeLabels: ASSET_TYPE_LABELS,
@@ -156,7 +157,7 @@ export async function GET(request: Request) {
         pageSize,
         pageCount: Math.max(1, Math.ceil(total / pageSize))
       }
-    });
+    }));
   } catch (error) {
     console.error("[api/materials] search failed", error);
     return NextResponse.json(

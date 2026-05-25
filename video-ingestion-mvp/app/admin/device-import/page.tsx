@@ -6,9 +6,9 @@ export default function DeviceImportPage() {
   return (
     <AppShell>
       <PageHeader
-        eyebrow="Device Import"
-        title="设备导入"
-        description="从设备拷贝目录扫描带 _READY.txt 的素材文件夹，并进入同一条 AI 入库管道。"
+        eyebrow="Large File Import"
+        title="大文件 / 直播录屏导入"
+        description="10GB+ 原片、50GB+ 直播录屏和 NAS 素材优先走本地目录导入，避免浏览器长时间上传。"
       />
       <DeviceImportClient />
     </AppShell>

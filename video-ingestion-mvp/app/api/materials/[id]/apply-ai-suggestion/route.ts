@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getRouteId, jsonError, readJson, requireMaterial } from "@/app/api/_utils";
 import { normalizeOperatorName } from "@/lib/operator/operator-context";
+import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import { ingestionPipeline } from "@/modules/ingestion/ingestion.pipeline";
 
 export const runtime = "nodejs";
@@ -12,7 +13,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const material = await requireMaterial(id);
   try {
     const updated = await ingestionPipeline.applyLatestSuggestion(material, normalizeOperatorName(body.operatorName));
-    return NextResponse.json({ material: updated });
+    return NextResponse.json(toJsonSafe({ material: updated }));
   } catch (error) {
     return jsonError((error as Error).message || "应用 AI 建议失败。");
   }

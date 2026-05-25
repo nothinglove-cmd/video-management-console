@@ -13,6 +13,7 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { nullableByteSizeToSafeNumber } from "@/lib/serialization/bigint-json";
 import {
   getCachedResolvedStorageRoot,
   refreshResolvedStorageRoot
@@ -86,6 +87,11 @@ export type MoveResult = {
   absolutePath: string;
   primaryCategory: string;
   thumbnailPath?: string | null;
+};
+
+export type SafeMoveOptions = {
+  allowCrossDeviceCopy?: boolean;
+  crossDeviceErrorMessage?: string;
 };
 
 function todayIdPart() {
@@ -392,7 +398,7 @@ export class StorageService {
     };
   }
 
-  async safeMove(fromAbsolutePath: string, toAbsolutePath: string) {
+  async safeMove(fromAbsolutePath: string, toAbsolutePath: string, options: SafeMoveOptions = {}) {
     this.assertInsideRoot(fromAbsolutePath);
     this.assertInsideRoot(toAbsolutePath);
     await fs.mkdir(path.dirname(toAbsolutePath), { recursive: true });
@@ -401,6 +407,9 @@ export class StorageService {
       await fs.rename(fromAbsolutePath, toAbsolutePath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+      if (options.allowCrossDeviceCopy === false) {
+        throw new Error(options.crossDeviceErrorMessage || "跨磁盘/卷移动需要复制文件，已阻止本次移动。");
+      }
       await fs.copyFile(fromAbsolutePath, toAbsolutePath);
       await fs.unlink(fromAbsolutePath);
     }
@@ -410,9 +419,10 @@ export class StorageService {
     fromAbsolutePath: string;
     targetCategory: string;
     storedFileName: string;
+    moveOptions?: SafeMoveOptions;
   }): Promise<MoveResult> {
     const destination = await this.getUniqueDestination(params.targetCategory, params.storedFileName);
-    await this.safeMove(params.fromAbsolutePath, destination.absolutePath);
+    await this.safeMove(params.fromAbsolutePath, destination.absolutePath, params.moveOptions);
     return {
       storedFileName: destination.fileName,
       relativePath: destination.relativePath,
@@ -509,7 +519,7 @@ export class StorageService {
       shooterName: material.shooterName,
       uploaderName: material.uploaderName,
       uploadTime: material.createdAt.toISOString(),
-      fileSize: material.fileSize,
+      fileSize: nullableByteSizeToSafeNumber(material.fileSize),
       mimeType: material.mimeType,
       duration: material.duration,
       width: material.width,
@@ -566,7 +576,7 @@ export class StorageService {
         relativePath: derivative.relativePath,
         fileName: derivative.fileName,
         mimeType: derivative.mimeType,
-        fileSize: derivative.fileSize,
+        fileSize: nullableByteSizeToSafeNumber(derivative.fileSize),
         width: derivative.width,
         height: derivative.height,
         duration: derivative.duration,
@@ -930,10 +940,10 @@ export class StorageService {
     return getAllowedCategories(assetType);
   }
 
-  async moveFailedFile(fromAbsolutePath: string, desiredName: string) {
+  async moveFailedFile(fromAbsolutePath: string, desiredName: string, moveOptions?: SafeMoveOptions) {
     const destination = await this.getUniqueDestination(FAILED_DIR, desiredName);
     if (await exists(fromAbsolutePath)) {
-      await this.safeMove(fromAbsolutePath, destination.absolutePath);
+      await this.safeMove(fromAbsolutePath, destination.absolutePath, moveOptions);
     }
     return destination;
   }
