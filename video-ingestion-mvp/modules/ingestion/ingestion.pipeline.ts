@@ -35,6 +35,22 @@ export type IngestFileInput = {
   manualAssetType?: ManualAssetType;
 };
 
+export type RegenerateDerivativesOptions = {
+  includeThumbnail?: boolean;
+  includeAiFrames?: boolean;
+  includePreview?: boolean;
+  operatorName?: string | null;
+  reason?: string;
+};
+
+export type RegenerateDerivativesResult = {
+  material: Material;
+  thumbnailPath: string | null;
+  previewPath: string | null;
+  aiFrameCount: number;
+  warnings: string[];
+};
+
 const MEDIA_EXTENSIONS = new Set([
   ".mp4",
   ".mov",
@@ -766,6 +782,124 @@ export class IngestionPipeline {
     });
 
     return updated;
+  }
+
+  async regenerateDerivativesForMaterial(
+    material: Material,
+    options: RegenerateDerivativesOptions = {}
+  ): Promise<RegenerateDerivativesResult> {
+    await storageService.initializeStorage();
+    const includeThumbnail = options.includeThumbnail ?? true;
+    const includeAiFrames = options.includeAiFrames ?? true;
+    const includePreview = options.includePreview ?? false;
+    const sourceAbsolutePath = storageService.resolve(material.relativePath);
+    if (!(await fileExists(sourceAbsolutePath))) {
+      throw new Error("素材文件不存在，无法重新生成缩略图或预览。");
+    }
+
+    let processingAbsoluteDirectory: string | null = null;
+    const warnings: string[] = [];
+
+    try {
+      const mediaInfo = await mediaService.readMediaInfo(sourceAbsolutePath, material.mimeType);
+      warnings.push(...mediaInfo.warnings.filter(Boolean));
+      let workingMaterial = await prisma.material.update({
+        where: { id: material.id },
+        data: {
+          absolutePath: sourceAbsolutePath,
+          duration: mediaInfo.duration ?? material.duration,
+          width: mediaInfo.width ?? material.width,
+          height: mediaInfo.height ?? material.height,
+          orientation: mediaInfo.orientation === "unknown"
+            ? material.orientation ?? mediaInfo.orientation
+            : mediaInfo.orientation
+        }
+      });
+
+      let thumbnailPath: string | null = workingMaterial.thumbnailPath;
+      if (includeThumbnail) {
+        const thumbnail = await derivativeService.generateThumbnailForMaterial({
+          material: workingMaterial,
+          mediaInfo
+        });
+        warnings.push(...thumbnail.warnings.filter(Boolean));
+        if (thumbnail.thumbnailPath) {
+          workingMaterial = await prisma.material.update({
+            where: { id: workingMaterial.id },
+            data: { thumbnailPath: thumbnail.thumbnailPath }
+          });
+          thumbnailPath = thumbnail.thumbnailPath;
+        } else if (
+          workingMaterial.thumbnailPath &&
+          !(await fileExists(storageService.resolve(workingMaterial.thumbnailPath)))
+        ) {
+          workingMaterial = await prisma.material.update({
+            where: { id: workingMaterial.id },
+            data: { thumbnailPath: null }
+          });
+          thumbnailPath = null;
+        }
+      }
+
+      let aiFrameCount = 0;
+      if (includeAiFrames) {
+        const processingRelativeDirectory = await storageService.createProcessingDirectory(
+          `REGENERATE-${workingMaterial.materialId}`,
+          workingMaterial.originalFileName
+        );
+        processingAbsoluteDirectory = storageService.resolve(processingRelativeDirectory);
+        const frameResult = await mediaService.extractKeyFrames({
+          filePath: sourceAbsolutePath,
+          mediaInfo,
+          outputDirectory: processingAbsoluteDirectory,
+          fileSize: byteSizeToSafeNumber(workingMaterial.fileSize)
+        }).catch((error) => ({
+          frames: [],
+          warnings: [`关键帧重新抽取失败，但缩略图修复继续：${(error as Error).message}`]
+        }));
+        warnings.push(...frameResult.warnings.filter(Boolean));
+        const aiFrames = await derivativeService.saveAiFramesForMaterial({
+          material: workingMaterial,
+          framePaths: frameResult.frames
+        });
+        warnings.push(...aiFrames.warnings.filter(Boolean));
+        aiFrameCount = aiFrames.derivatives.filter((derivative) => derivative.status === "READY").length;
+      }
+
+      let previewPath: string | null = null;
+      if (includePreview && !mediaInfo.isImage) {
+        const preview = await derivativeService.generatePreviewMp4ForMaterial({
+          material: workingMaterial,
+          mediaInfo
+        });
+        warnings.push(...preview.warnings.filter(Boolean));
+        previewPath = preview.previewPath;
+      }
+
+      await storageService.writeMetadataJson(workingMaterial);
+      await storageService.logOperation({
+        materialId: workingMaterial.materialId,
+        operationType: "REANALYZE",
+        operatorName: options.operatorName || "系统修复",
+        beforeFileName: material.storedFileName,
+        afterFileName: workingMaterial.storedFileName,
+        beforePath: material.relativePath,
+        afterPath: workingMaterial.relativePath,
+        notes: `${options.reason || "重新生成缩略图、AI 抽帧和预览派生文件。"}${warnings.length ? ` warnings: ${warnings.join(" | ")}` : ""}`
+      });
+
+      return {
+        material: workingMaterial,
+        thumbnailPath,
+        previewPath,
+        aiFrameCount,
+        warnings
+      };
+    } finally {
+      if (processingAbsoluteDirectory) {
+        await fs.rm(processingAbsoluteDirectory, { recursive: true, force: true }).catch(() => undefined);
+      }
+    }
   }
 
   async applyLatestSuggestion(material: Material, operatorName = "系统") {

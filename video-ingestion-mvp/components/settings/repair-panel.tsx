@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, Database, FileJson, RefreshCcw, SearchCheck } from "lucide-react";
+import { AlertTriangle, Database, FileJson, ImagePlus, RefreshCcw, SearchCheck } from "lucide-react";
 
 import { skin, type SkinStatusTone } from "@/components/theme/skin";
 import { Button } from "@/components/ui/button";
@@ -82,10 +82,14 @@ export function RepairPanel() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
 
-  async function post(path: string, success: (data: any) => string) {
+  async function post(path: string, success: (data: any) => string, body?: unknown) {
     setBusy(path);
     setMessage("");
-    const response = await fetch(path, { method: "POST" });
+    const response = await fetch(path, {
+      method: "POST",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined
+    });
     const data = await response.json().catch(() => ({}));
     setBusy("");
     if (!response.ok) {
@@ -188,6 +192,13 @@ export function RepairPanel() {
             description="根据数据库重新写 metadata JSON。"
             disabled={Boolean(busy)}
             onClick={() => post("/api/admin/repair/rebuild-metadata", (data) => `已写入 ${data.written ?? 0} 个素材说明文件。`)}
+          />
+          <RepairAction
+            icon={ImagePlus}
+            label="修复缺失缩略图"
+            description="重新生成缺失或失败的缩略图、AI 抽帧和预览。"
+            disabled={Boolean(busy)}
+            onClick={() => post("/api/admin/repair/regenerate-derivatives", (data) => data.message || `已重新生成 ${data.regenerated ?? 0} 个素材派生文件。`, { limit: 200 })}
           />
           <RepairAction
             icon={Database}

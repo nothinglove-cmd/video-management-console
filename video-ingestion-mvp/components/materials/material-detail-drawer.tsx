@@ -6,6 +6,7 @@ import {
   Download,
   FilePenLine,
   FolderInput,
+  ImagePlus,
   MoreHorizontal,
   PackagePlus,
   RefreshCcw,
@@ -361,6 +362,7 @@ function getDetailActionItems(material: MaterialDto, actions: MaterialActions): 
     actions.move ? { label: "分类", icon: FolderInput, onSelect: () => actions.move?.(material) } : null,
     actions.editTags ? { label: "标签", icon: Tags, onSelect: () => actions.editTags?.(material) } : null,
     actions.reanalyze ? { label: "重新识别", icon: RefreshCcw, onSelect: () => actions.reanalyze?.(material) } : null,
+    actions.regenerateDerivatives ? { label: "重建缩略图/预览", icon: ImagePlus, onSelect: () => actions.regenerateDerivatives?.(material) } : null,
     actions.addToPackage ? { label: "精选包", icon: PackagePlus, onSelect: () => actions.addToPackage?.(material) } : null,
     { label: "下载", icon: Download, href: `/api/materials/${material.id}/download` },
     actions.trash ? { label: "删除", icon: Trash2, onSelect: () => actions.trash?.(material), tone: "danger" } : null

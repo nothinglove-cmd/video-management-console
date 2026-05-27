@@ -283,6 +283,11 @@ export function MaterialAdmin({
         editTags,
         trash: trashMaterial,
         reanalyze: (material) => post(`/api/materials/${material.id}/reanalyze`),
+        regenerateDerivatives: (material) => post(`/api/materials/${material.id}/regenerate-derivatives`, {
+          includeThumbnail: true,
+          includeAiFrames: true,
+          includePreview: true
+        }),
         applyAiSuggestion: (material) => post(`/api/materials/${material.id}/apply-ai-suggestion`),
         confirm: (material) => post(`/api/materials/${material.id}/confirm`),
         useUserSelection: (material) => post(`/api/materials/${material.id}/resolve-conflict`, { action: "USE_USER_SELECTION" }),

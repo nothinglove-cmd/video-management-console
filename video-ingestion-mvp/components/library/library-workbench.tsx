@@ -16,6 +16,7 @@ import {
   Folder,
   FolderInput,
   Grid2X2,
+  ImagePlus,
   List,
   MoreHorizontal,
   PackagePlus,
@@ -270,6 +271,7 @@ export function LibraryWorkbench() {
         editTags: (material) => handleAction("tags", material),
         trash: (material) => handleAction("trash", material),
         reanalyze: (material) => handleAction("reanalyze", material),
+        regenerateDerivatives: (material) => handleAction("regenerateDerivatives", material),
         applyAiSuggestion: (material) => handleAction("applyAiSuggestion", material),
         confirm: (material) => handleAction("confirm", material),
         addToPackage: (material) => handleAction("package", material)
@@ -455,6 +457,11 @@ export function LibraryWorkbench() {
     if (action === "trash") setDialog({ type: "trash", material });
     if (action === "preview") setPreviewMaterial(material);
     if (action === "reanalyze") void post(`/api/materials/${material.id}/reanalyze`);
+    if (action === "regenerateDerivatives") void post(`/api/materials/${material.id}/regenerate-derivatives`, {
+      includeThumbnail: true,
+      includeAiFrames: true,
+      includePreview: true
+    });
     if (action === "applyAiSuggestion") void post(`/api/materials/${material.id}/apply-ai-suggestion`);
     if (action === "confirm") void post(`/api/materials/${material.id}/confirm`);
     if (action === "package") setMessage("加入精选包是占位功能，后续阶段实现。");
@@ -988,6 +995,7 @@ function getMaterialActionItems(material: MaterialDto, onAction: (action: string
     canManage ? { label: "分类", icon: FolderInput, onSelect: () => onAction("move", material) } : null,
     canManage ? { label: "标签", icon: Tags, onSelect: () => onAction("tags", material) } : null,
     canManage ? { label: "重新识别", icon: RefreshCcw, onSelect: () => onAction("reanalyze", material) } : null,
+    canManage ? { label: "重建缩略图/预览", icon: ImagePlus, onSelect: () => onAction("regenerateDerivatives", material) } : null,
     canManage ? { label: "精选包", icon: PackagePlus, onSelect: () => onAction("package", material) } : null,
     { label: "下载", icon: Download, href: `/api/materials/${material.id}/download` },
     canManage ? { label: "删除", icon: Trash2, onSelect: () => onAction("trash", material), tone: "danger" } : null

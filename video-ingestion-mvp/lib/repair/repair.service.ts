@@ -3,6 +3,8 @@ import path from "node:path";
 import { type AssetType, type Category, type Material, type MaterialStatus, type SourceType } from "@prisma/client";
 
 import { writeCategoryMetadataJsonForRepair } from "@/lib/directories/directory.service";
+import { derivativeService } from "@/lib/media/derivative.service";
+import { mediaService } from "@/lib/media/media.service";
 import { prisma } from "@/lib/prisma";
 import type {
   StorageAuditIssue,
@@ -12,9 +14,10 @@ import type {
   StorageSafeFixResult
 } from "@/lib/repair/storage-audit.types";
 import { buildSearchTextFromMaterial } from "@/lib/search/material-search.service";
-import { byteSizeToBigInt } from "@/lib/serialization/bigint-json";
+import { byteSizeToBigInt, byteSizeToSafeNumber } from "@/lib/serialization/bigint-json";
 import { PROCESSING_DIR } from "@/lib/storage/storage.constants";
 import { storageService } from "@/lib/storage/storage.service";
+import { ingestionPipeline } from "@/modules/ingestion/ingestion.pipeline";
 
 const DERIVATIVES_ROOT = "_derivatives";
 const CATEGORY_METADATA_FILE = ".category.json";
@@ -43,6 +46,7 @@ const AUDIT_GROUPS: StorageAuditIssueGroup[] = [
 ];
 
 const PROCESSING_TEMP_FRAME_SAMPLE_LIMIT = 8;
+const DEFAULT_REGENERATE_DERIVATIVES_LIMIT = 200;
 
 type StorageAuditIssueDraft = Omit<StorageAuditIssue, "id"> & { id?: string };
 
@@ -894,6 +898,106 @@ export async function rebuildFromMetadata() {
   }
 
   return { created, skipped };
+}
+
+export async function regenerateMissingDerivatives(limit = DEFAULT_REGENERATE_DERIVATIVES_LIMIT) {
+  await storageService.initializeStorage();
+  const safeLimit = Math.min(Math.max(Math.trunc(limit) || DEFAULT_REGENERATE_DERIVATIVES_LIMIT, 1), 1000);
+  const materials = await prisma.material.findMany({
+    where: {
+      status: { not: "TRASHED" }
+    },
+    include: {
+      derivativeFiles: {
+        where: {
+          type: { in: ["THUMBNAIL", "PREVIEW_MP4"] },
+          NOT: { status: "DELETED" }
+        },
+        orderBy: { updatedAt: "desc" }
+      }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+
+  const candidates: Material[] = [];
+  for (const material of materials) {
+    if (candidates.length >= safeLimit) break;
+    if (await needsDerivativeRegeneration(material)) {
+      candidates.push(material);
+    }
+  }
+
+  let regenerated = 0;
+  let skipped = 0;
+  const failed: Array<{ materialId: string; fileName: string; message: string }> = [];
+  const warnings: Array<{ materialId: string; message: string }> = [];
+
+  for (const material of candidates) {
+    try {
+      const result = await ingestionPipeline.regenerateDerivativesForMaterial(material, {
+        includeThumbnail: true,
+        includeAiFrames: true,
+        includePreview: true,
+        operatorName: "系统修复",
+        reason: "系统修复：重新生成缺失或失败的缩略图、AI 抽帧和 preview MP4。"
+      });
+      regenerated += 1;
+      for (const warning of result.warnings) {
+        warnings.push({ materialId: material.materialId, message: warning });
+      }
+    } catch (error) {
+      failed.push({
+        materialId: material.materialId,
+        fileName: material.storedFileName,
+        message: (error as Error).message || "重新生成失败。"
+      });
+    }
+  }
+
+  skipped = Math.max(0, materials.length - candidates.length);
+
+  return {
+    scanned: materials.length,
+    candidates: candidates.length,
+    regenerated,
+    skipped,
+    failed,
+    warnings: warnings.slice(0, 50),
+    message: `派生文件修复完成：扫描 ${materials.length} 个素材，需处理 ${candidates.length} 个，成功 ${regenerated} 个，失败 ${failed.length} 个。`
+  };
+}
+
+async function needsDerivativeRegeneration(material: Material) {
+  const absolutePath = storageService.resolve(material.relativePath);
+  if (!(await exists(absolutePath))) return false;
+  const thumbnailUsable = await hasUsableThumbnail(material);
+  if (!thumbnailUsable) return true;
+  if (isImageMaterial(material)) return false;
+  const mediaInfo = await mediaService.readMediaInfo(absolutePath, material.mimeType);
+  const profile = mediaService.getProcessingProfile({
+    fileSize: byteSizeToSafeNumber(material.fileSize),
+    mediaInfo
+  });
+  if (profile.skipPreviewMp4) return false;
+  return !(await hasUsablePreviewMp4(material.materialId));
+}
+
+async function hasUsableThumbnail(material: Material) {
+  if (material.thumbnailPath && await exists(storageService.resolve(material.thumbnailPath))) {
+    return true;
+  }
+  const derivative = await derivativeService.findReadyThumbnail(material.materialId);
+  return Boolean(derivative?.relativePath && await exists(storageService.resolve(derivative.relativePath)));
+}
+
+async function hasUsablePreviewMp4(materialId: string) {
+  const derivative = await derivativeService.findReadyPreviewMp4(materialId);
+  return Boolean(derivative?.relativePath && await exists(storageService.resolve(derivative.relativePath)));
+}
+
+function isImageMaterial(material: Material) {
+  if (material.mimeType?.startsWith("image/")) return true;
+  return [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"].includes(path.extname(material.relativePath).toLowerCase());
 }
 
 async function walkStorage(root: string, current = root): Promise<string[]> {

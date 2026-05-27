@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Download, FilePenLine, FolderInput, PackagePlus, RefreshCcw, RotateCcw, Tags, Trash2 } from "lucide-react";
+import { CheckCircle2, Download, FilePenLine, FolderInput, ImagePlus, PackagePlus, RefreshCcw, RotateCcw, Tags, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { MaterialDto } from "@/components/materials/types";
@@ -12,6 +12,7 @@ export type MaterialActions = {
   editTags?: (material: MaterialDto) => void;
   trash?: (material: MaterialDto) => void;
   reanalyze?: (material: MaterialDto) => void;
+  regenerateDerivatives?: (material: MaterialDto) => void;
   applyAiSuggestion?: (material: MaterialDto) => void;
   confirm?: (material: MaterialDto) => void;
   useUserSelection?: (material: MaterialDto) => void;
@@ -57,6 +58,11 @@ export function ActionToolbar({
         {actions.reanalyze ? (
           <Button variant="secondary" size="sm" className={actionButtonClassName} onClick={() => actions.reanalyze?.(material)}>
             <RefreshCcw className="mr-1 h-3.5 w-3.5" /> AI
+          </Button>
+        ) : null}
+        {actions.regenerateDerivatives ? (
+          <Button variant="secondary" size="sm" className={actionButtonClassName} onClick={() => actions.regenerateDerivatives?.(material)}>
+            <ImagePlus className="mr-1 h-3.5 w-3.5" /> 缩略图
           </Button>
         ) : null}
         {actions.applyAiSuggestion ? (
