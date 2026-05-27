@@ -127,6 +127,7 @@ function displayModel(config: Pick<PublicDbConfig | PublicAiConfig | FormState, 
 
 function modelSummaryLabel(provider: AiProvider) {
   if (provider === "volcengine") return "Endpoint";
+  if (provider === "local_openai_compatible") return "中转站模型";
   if (isLocalProvider(provider)) return "本地模型";
   return "模型";
 }
@@ -218,7 +219,7 @@ function currentKeyMeta(provider: AiProvider, config: PublicDbConfig | PublicAiC
     return { field: "arkApiKey" as const, clearField: "clearArkApiKey" as const, configured: Boolean(config?.arkApiKeyConfigured), label: "Ark API Key", optional: false };
   }
   if (provider === "local_openai_compatible") {
-    return { field: "localApiKey" as const, clearField: "clearLocalApiKey" as const, configured: Boolean(config?.localApiKeyConfigured), label: "Local API Key", optional: true };
+    return { field: "localApiKey" as const, clearField: "clearLocalApiKey" as const, configured: Boolean(config?.localApiKeyConfigured), label: "中转站 API Key", optional: false };
   }
   return null;
 }
@@ -561,7 +562,7 @@ export function AiProviderConfigPanel() {
                 </Select>
               </Field>
               {showModel ? (
-                <Field label={form.provider === "volcengine" ? "Endpoint ID / 模型" : isLocalProvider(form.provider) ? "Local Model" : "模型"}>
+                <Field label={form.provider === "volcengine" ? "Endpoint ID / 模型" : form.provider === "local_openai_compatible" ? "中转站模型" : isLocalProvider(form.provider) ? "Local Model" : "模型"}>
                   <Input
                     list={preset.recommendedModels.length ? modelInputId : undefined}
                     value={currentModel(form)}
@@ -866,7 +867,7 @@ function AdvancedFields({
 
         {form.provider === "local_openai_compatible" ? (
           <>
-            <LocalFields form={form} setForm={setForm} />
+            <LocalFields form={form} setForm={setForm} mode="openai-compatible" />
             <CommonVisionFields form={form} setForm={setForm} />
           </>
         ) : null}
@@ -914,15 +915,22 @@ function TimeoutField({ form, setForm }: { form: FormState; setForm: Dispatch<Se
   );
 }
 
-function LocalFields({ form, setForm }: { form: FormState; setForm: Dispatch<SetStateAction<FormState>> }) {
+function LocalFields({ form, setForm, mode = "local" }: { form: FormState; setForm: Dispatch<SetStateAction<FormState>>; mode?: "local" | "openai-compatible" }) {
+  const isOpenAiCompatible = mode === "openai-compatible";
   return (
     <>
-      <Field label="Local Base URL">
-        <Input value={form.localBaseUrl} onChange={(event) => setForm((current) => ({ ...current, localBaseUrl: event.target.value }))} placeholder="http://127.0.0.1:11434" />
+      <Field label={isOpenAiCompatible ? "中转站 Base URL" : "Local Base URL"}>
+        <Input
+          value={form.localBaseUrl}
+          onChange={(event) => setForm((current) => ({ ...current, localBaseUrl: event.target.value }))}
+          placeholder={isOpenAiCompatible ? "https://your-relay.example.com/v1" : "http://127.0.0.1:11434"}
+        />
       </Field>
-      <Field label="Local Healthcheck URL">
-        <Input value={form.localHealthcheckUrl} onChange={(event) => setForm((current) => ({ ...current, localHealthcheckUrl: event.target.value }))} placeholder="可选，自定义 healthcheck URL" />
-      </Field>
+      {isOpenAiCompatible ? null : (
+        <Field label="Local Healthcheck URL">
+          <Input value={form.localHealthcheckUrl} onChange={(event) => setForm((current) => ({ ...current, localHealthcheckUrl: event.target.value }))} placeholder="可选，自定义 healthcheck URL" />
+        </Field>
+      )}
     </>
   );
 }
@@ -949,7 +957,7 @@ function TestButton({ id, state, onClick }: { id: string; state: TestState; onCl
 function TestResult({ id, state }: { id: string; state: TestState }) {
   if (state.status === "idle" || state.status === "testing" || state.id !== id) return null;
   const provider = typeof state.diagnostics?.provider === "string" ? state.diagnostics.provider : "";
-  const isLocalHealthcheck = provider === "local_ollama" || provider === "local_openai_compatible";
+  const isLocalHealthcheck = provider === "local_ollama";
   return (
     <Surface
       tone="muted"
@@ -965,7 +973,7 @@ function TestResult({ id, state }: { id: string; state: TestState }) {
       <p className={cn("mt-1", skin.typography.meta)}>
         {isLocalHealthcheck
           ? "本地 healthcheck 不发送图片，不调用识别接口，也不会改变入库 AI 行为。"
-          : "云端 provider 测试会发送一张 64x64 测试图片，用于验证图片输入和结构化输出能力。"}
+          : "测试会发送一张 64x64 测试图片，用于验证图片输入和结构化输出能力。"}
       </p>
       {state.diagnostics ? (
         <pre className={cn("mt-2 max-h-44 overflow-auto rounded-md bg-white/70 p-2 text-slate-700", skin.textDensity.metadata)}>

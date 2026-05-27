@@ -6,6 +6,14 @@ import tls from "node:tls";
 import type { AiClassification, ClassifierContext, ClassifierResult } from "@/modules/ai/material-classifier.service";
 import type { OpenAiCompatibleProviderConfig } from "@/modules/ai/providers/types";
 
+type ResponsesImageInput = {
+  type: "input_image";
+  detail: NonNullable<OpenAiCompatibleProviderConfig["imageDetail"]>;
+  image_url: string;
+};
+
+type OpenAiEndpointType = "responses" | "chat_completions" | "chat_completions_json_object";
+
 class OpenAiProviderError extends Error {
   status?: number;
   requestId?: string | null;
@@ -51,22 +59,26 @@ export function summarizeOpenAiError(error: unknown) {
   };
 }
 
-function providerLabel(provider: "openai" | "volcengine") {
-  return provider === "volcengine" ? "火山方舟" : "OpenAI";
+function providerLabel(provider: OpenAiCompatibleProviderConfig["provider"]) {
+  if (provider === "volcengine") return "火山方舟";
+  if (provider === "local_openai_compatible") return "OpenAI-compatible 中转站";
+  return "OpenAI";
 }
 
 export class OpenAiCompatibleProvider {
   async classify(frames: string[], context: ClassifierContext, config: OpenAiCompatibleProviderConfig): Promise<ClassifierResult> {
     const label = providerLabel(config.provider);
     const sentFrames = frames.slice(0, config.frameMax);
-    const imageInputs = await Promise.all(
+    const imageInputs: ResponsesImageInput[] = await Promise.all(
       sentFrames.map(async (frame) => ({
-        type: "input_image",
-        detail: config.imageDetail,
+        type: "input_image" as const,
+        detail: config.imageDetail || "low",
         image_url: await this.toDataUrl(frame)
       }))
     );
 
+    const prompt = config.buildPrompt(context);
+    const schema = config.outputJsonSchema(config.provider !== "openai");
     const requestBody = {
       model: config.model,
       input: [
@@ -75,7 +87,7 @@ export class OpenAiCompatibleProvider {
           content: [
             {
               type: "input_text",
-              text: config.buildPrompt(context)
+              text: prompt
             },
             ...imageInputs
           ]
@@ -86,12 +98,13 @@ export class OpenAiCompatibleProvider {
           type: "json_schema",
           name: "video_material_classification",
           strict: true,
-          schema: config.outputJsonSchema(config.provider === "volcengine")
+          schema
         }
       }
     };
 
-    const response = await this.postOpenAiJson({
+    let endpointType: OpenAiEndpointType = "responses";
+    let response = await this.postOpenAiJson({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       body: requestBody,
@@ -99,18 +112,69 @@ export class OpenAiCompatibleProvider {
       proxyUrl: config.proxyUrl
     });
 
-    const requestId = response.headers["x-request-id"] || null;
     if (response.status < 200 || response.status >= 300) {
-      const errorMessage = this.extractOpenAiErrorMessage(response.body);
-      throw new OpenAiProviderError(`${label} API ${response.status}: ${errorMessage}`, {
-        status: response.status,
-        requestId,
-        errorType: classifyOpenAiError(response.status, errorMessage)
-      });
+      if (config.provider === "local_openai_compatible") {
+        let chatResponse = await this.postOpenAiJson({
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          body: this.buildChatCompletionsBody({
+            model: config.model,
+            prompt,
+            imageInputs,
+            schema
+          }),
+          timeoutMs: config.requestTimeoutMs,
+          proxyUrl: config.proxyUrl,
+          endpointPath: "/chat/completions"
+        });
+        let chatEndpointType: OpenAiEndpointType = "chat_completions";
+        if (chatResponse.status < 200 || chatResponse.status >= 300) {
+          const chatErrorMessage = this.extractOpenAiErrorMessage(chatResponse.body);
+          if (this.shouldRetryChatCompletionsWithJsonObject(chatResponse.status, chatErrorMessage)) {
+            chatResponse = await this.postOpenAiJson({
+              baseUrl: config.baseUrl,
+              apiKey: config.apiKey,
+              body: this.buildChatCompletionsBody({
+                model: config.model,
+                prompt,
+                imageInputs,
+                schema,
+                responseFormat: "json_object"
+              }),
+              timeoutMs: config.requestTimeoutMs,
+              proxyUrl: config.proxyUrl,
+              endpointPath: "/chat/completions"
+            });
+            chatEndpointType = "chat_completions_json_object";
+          }
+        }
+        if (chatResponse.status >= 200 && chatResponse.status < 300) {
+          response = chatResponse;
+          endpointType = chatEndpointType;
+        } else {
+          const errorMessage = this.extractOpenAiErrorMessage(chatResponse.body);
+          throw new OpenAiProviderError(`${label} API ${chatResponse.status}: ${errorMessage}`, {
+            status: chatResponse.status,
+            requestId: chatResponse.headers["x-request-id"] || null,
+            errorType: classifyOpenAiError(chatResponse.status, errorMessage)
+          });
+        }
+      } else {
+        const errorMessage = this.extractOpenAiErrorMessage(response.body);
+        throw new OpenAiProviderError(`${label} API ${response.status}: ${errorMessage}`, {
+          status: response.status,
+          requestId: response.headers["x-request-id"] || null,
+          errorType: classifyOpenAiError(response.status, errorMessage)
+        });
+      }
     }
 
+    const requestId = response.headers["x-request-id"] || null;
     const raw = JSON.parse(response.body) as Record<string, unknown>;
-    const outputText = this.extractOutputText(raw);
+    const isChatCompletionsEndpoint = endpointType === "chat_completions" || endpointType === "chat_completions_json_object";
+    const outputText = isChatCompletionsEndpoint
+      ? this.extractChatOutputText(raw) || this.extractOutputText(raw)
+      : this.extractOutputText(raw);
     if (!outputText) {
       throw new OpenAiProviderError(`${label} API 未返回可解析的 JSON 文本。`, {
         status: response.status,
@@ -158,7 +222,11 @@ export class OpenAiCompatibleProvider {
         requestId,
         status: response.status,
         fallbackUsed: false,
-        note: languageWarnings.join("；") || undefined
+        note: [
+          endpointType === "chat_completions" ? "中转站未使用 Responses API，已自动兼容 Chat Completions。" : "",
+          endpointType === "chat_completions_json_object" ? "中转站未使用 Responses API 或 strict JSON Schema，已自动兼容 Chat Completions JSON Object。" : "",
+          ...languageWarnings
+        ].filter(Boolean).join("；") || undefined
       },
       warnings: [...validated.warnings, ...languageWarnings],
       raw
@@ -170,18 +238,21 @@ export class OpenAiCompatibleProvider {
     apiKey,
     body,
     timeoutMs,
-    proxyUrl
+    proxyUrl,
+    endpointPath = "/responses"
   }: {
     baseUrl: string;
     apiKey: string;
     body: unknown;
     timeoutMs: number;
     proxyUrl?: string;
+    endpointPath?: "/responses" | "/chat/completions";
   }) {
     const payload = JSON.stringify(body);
+    const endpoint = `${baseUrl.replace(/\/$/, "")}${endpointPath}`;
     if (proxyUrl) {
       return this.postJsonThroughHttpProxy({
-        targetUrl: `${baseUrl.replace(/\/$/, "")}/responses`,
+        targetUrl: endpoint,
         apiKey,
         payload,
         timeoutMs,
@@ -191,7 +262,6 @@ export class OpenAiCompatibleProvider {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new Error(`AI provider 请求超过 ${timeoutMs}ms 未响应`)), timeoutMs);
-    const endpoint = `${baseUrl.replace(/\/$/, "")}/responses`;
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -220,6 +290,59 @@ export class OpenAiCompatibleProvider {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  buildChatCompletionsBody({
+    model,
+    prompt,
+    imageInputs,
+    schema,
+    responseFormat = "json_schema"
+  }: {
+    model: string;
+    prompt: string;
+    imageInputs: ResponsesImageInput[];
+    schema: Record<string, unknown>;
+    responseFormat?: "json_schema" | "json_object";
+  }) {
+    return {
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            ...imageInputs.map((image) => ({
+              type: "image_url",
+              image_url: {
+                url: image.image_url,
+                detail: image.detail
+              }
+            }))
+          ]
+        }
+      ],
+      response_format: responseFormat === "json_object"
+        ? { type: "json_object" }
+        : {
+            type: "json_schema",
+            json_schema: {
+              name: "video_material_classification",
+              strict: true,
+              schema
+            }
+          }
+    };
+  }
+
+  shouldRetryChatCompletionsWithJsonObject(status: number, message: string) {
+    const text = message.toLowerCase();
+    return status === 400 && (
+      text.includes("json_schema") ||
+      text.includes("response_format") ||
+      text.includes("strict") ||
+      text.includes("schema")
+    );
   }
 
   postJsonThroughHttpProxy({
@@ -383,6 +506,22 @@ export class OpenAiCompatibleProvider {
       }
     }
 
+    return null;
+  }
+
+  extractChatOutputText(response: Record<string, unknown>) {
+    const choices = response.choices;
+    if (!Array.isArray(choices)) return null;
+    for (const choice of choices) {
+      const message = (choice as { message?: unknown }).message;
+      const content = (message as { content?: unknown } | undefined)?.content;
+      if (typeof content === "string") return content;
+      if (!Array.isArray(content)) continue;
+      for (const item of content) {
+        const text = (item as { text?: unknown }).text;
+        if (typeof text === "string") return text;
+      }
+    }
     return null;
   }
 }

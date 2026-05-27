@@ -198,8 +198,16 @@ function checkAiProvider(env: EnvMap) {
     add("warn", "Local AI", "AI_PROVIDER=local is a legacy placeholder and currently falls back to mock.");
   }
 
-  if (provider === "local_openai_compatible" && !env.LOCAL_AI_BASE_URL && !env.AI_BASE_URL && !env.LOCAL_AI_HEALTHCHECK_URL) {
-    add("warn", "Local AI", "local_openai_compatible has no LOCAL_AI_BASE_URL, AI_BASE_URL, or LOCAL_AI_HEALTHCHECK_URL.");
+  if (provider === "local_openai_compatible") {
+    if (!env.LOCAL_AI_BASE_URL && !env.AI_BASE_URL) {
+      add("warn", "Local AI", "local_openai_compatible has no LOCAL_AI_BASE_URL or AI_BASE_URL.");
+    }
+    if (!env.LOCAL_AI_API_KEY && !env.AI_API_KEY && !env.OPENAI_API_KEY) {
+      add("warn", "Local AI", "local_openai_compatible has no LOCAL_AI_API_KEY, AI_API_KEY, or OPENAI_API_KEY.");
+    }
+    if (!env.LOCAL_AI_MODEL && !env.AI_MODEL) {
+      add("warn", "Local AI", "local_openai_compatible has no LOCAL_AI_MODEL or AI_MODEL.");
+    }
   }
 
   if (provider === "local_ollama" && !env.LOCAL_AI_BASE_URL && !env.AI_BASE_URL && !env.LOCAL_AI_HEALTHCHECK_URL) {

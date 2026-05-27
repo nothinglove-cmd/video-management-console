@@ -30,7 +30,7 @@ export type LocalizedClassificationResult = {
 };
 
 export type OpenAiCompatibleProviderConfig = {
-  provider: "openai" | "volcengine";
+  provider: "openai" | "volcengine" | "local_openai_compatible";
   model: string;
   apiKey: string;
   baseUrl: string;

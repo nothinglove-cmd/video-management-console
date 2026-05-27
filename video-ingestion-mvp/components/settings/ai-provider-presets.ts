@@ -13,6 +13,8 @@ export const OPENAI_RECOMMENDED_MODELS = [
 ];
 
 export const LOCAL_RECOMMENDED_MODELS = [
+  "gpt-4o-mini",
+  "gpt-4.1-mini",
   "llava",
   "qwen2.5vl",
   "minicpm-v"
@@ -86,9 +88,9 @@ export const AI_PROVIDER_PRESETS: Record<AiProvider, ProviderPreset> = {
     }
   },
   local_openai_compatible: {
-    label: "本地 OpenAI-compatible",
-    hint: "用于后续兼容本地 OpenAI 风格服务；本轮只保留配置和 healthcheck。",
-    modelPlaceholder: "请输入模型名",
+    label: "OpenAI-compatible 中转站",
+    hint: "用于兼容 OpenAI 格式的中转站或本地服务。请填写 Base URL、API Key 和支持图片输入的模型。",
+    modelPlaceholder: "例如 gpt-4o-mini / gpt-4.1-mini / 中转站模型名",
     recommendedModels: LOCAL_RECOMMENDED_MODELS,
     defaults: {
       fallbackProvider: "mock",

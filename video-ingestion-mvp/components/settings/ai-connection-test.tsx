@@ -56,7 +56,7 @@ export function AiConnectionTest() {
             </StatusPill>
           </div>
           <p className={cn("mt-1", skin.typography.meta)}>
-            线上验证图片输入与结构化输出；本地 provider 只做 healthcheck，不改变入库识别行为。
+            OpenAI、火山方舟和 OpenAI-compatible 中转站会发送测试图片；Ollama 只做本地 healthcheck。
           </p>
         </div>
         <Button onClick={testConnection} disabled={state.status === "testing"} className="min-h-10">
@@ -77,7 +77,7 @@ export function AiConnectionTest() {
           <StatusPill tone={state.status === "success" ? "success" : "danger"}>{state.status === "success" ? "测试成功" : "测试失败"}</StatusPill>
           <p className="mt-1 break-all">{state.message}</p>
           <p className={cn("mt-1", skin.typography.meta)}>
-            本地 healthcheck 不发送图片，不调用识别接口，也不会改变入库 AI 行为。
+            真实视觉 provider 会发送一张 64x64 测试图片，用于验证图片输入和结构化输出能力。
           </p>
           {state.diagnostics ? (
             <pre className={cn("mt-2 max-h-52 overflow-auto rounded-md bg-white/70 p-2 text-slate-700", skin.textDensity.metadata)}>

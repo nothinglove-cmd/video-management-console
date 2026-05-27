@@ -13,7 +13,6 @@ import { localHealthcheckService } from "@/modules/ai/providers/local-healthchec
 import { openAiCompatibleProvider, summarizeOpenAiError } from "@/modules/ai/providers/openai-compatible.provider";
 import {
   isLocalOllamaProvider,
-  isLocalOpenAiCompatibleProvider,
   isOpenAiCompatibleProvider,
   isReservedLocalProvider,
   toRuntimeProvider
@@ -133,7 +132,7 @@ export type AiRunDiagnostics = {
 };
 
 export type OpenAiRequestConfig = {
-  provider: "openai" | "volcengine";
+  provider: "openai" | "volcengine" | "local_openai_compatible";
   model: string;
   apiKey: string;
   baseUrl: string;
@@ -142,6 +141,8 @@ export type OpenAiRequestConfig = {
   requestTimeoutMs: number;
   proxyUrl?: string;
 };
+
+type OpenAiEndpointType = "responses" | "chat_completions" | "chat_completions_json_object";
 
 const MOCK_KEYWORDS = {
   reference: ["对标", "抖音", "快手", "爆款", "参考", "竞品", "ref"],
@@ -266,8 +267,10 @@ function classifyOpenAiError(status?: number | null, message = "") {
   return "network_or_runtime_error";
 }
 
-function providerLabel(provider: "openai" | "volcengine") {
-  return provider === "volcengine" ? "火山方舟" : "OpenAI";
+function providerLabel(provider: OpenAiRequestConfig["provider"]) {
+  if (provider === "volcengine") return "火山方舟";
+  if (provider === "local_openai_compatible") return "OpenAI-compatible 中转站";
+  return "OpenAI";
 }
 
 function validateClassification(value: unknown, fallbackReason: string) {
@@ -547,13 +550,42 @@ export class MaterialClassifierService {
 
     if (isOpenAiCompatibleProvider(config.provider)) {
       const requestedProvider = config.provider;
-      const apiKey = requestedProvider === "volcengine" ? config.arkApiKey : config.openaiApiKey;
-      const baseUrl =
-        requestedProvider === "volcengine" ? config.volcengineBaseUrl : config.baseUrl || "https://api.openai.com/v1";
-      const proxyUrl =
-        requestedProvider === "volcengine" ? config.volcengineProxyUrl : config.openaiProxyUrl;
-      const missingKeyName = requestedProvider === "volcengine" ? "ARK_API_KEY" : "OPENAI_API_KEY";
+      const apiKey = this.apiKeyForProvider(config, requestedProvider);
+      const baseUrl = this.baseUrlForProvider(config, requestedProvider);
+      const proxyUrl = this.proxyUrlForProvider(config, requestedProvider);
+      const model = this.modelForProvider(config, requestedProvider);
+      const missingKeyName = this.apiKeyNameForProvider(requestedProvider);
       const label = providerLabel(requestedProvider);
+
+      if (!baseUrl) {
+        const missingBaseUrlName = requestedProvider === "local_openai_compatible"
+          ? "LOCAL_AI_BASE_URL 或 AI_BASE_URL"
+          : "AI Base URL";
+        const mock = await mockProvider.classify(frames, context, validateClassification);
+        return this.withRunMetadata({
+          ...mock,
+          requestedProvider,
+          usedFallback: true,
+          diagnostics: {
+            requestedProvider,
+            actualProvider: "mock",
+            provider: requestedProvider,
+            model,
+            baseUrl,
+            frameCount: frames.length,
+            sentFrameCount: 0,
+            imageDetail: config.imageDetail,
+            timeoutMs: config.requestTimeoutMs,
+            proxyEnabled: Boolean(proxyUrl),
+            requestId: null,
+            status: null,
+            fallbackUsed: true,
+            errorSummary: `未配置 ${missingBaseUrlName}，已自动回退 mock AI。`,
+            errorType: "missing_base_url"
+          },
+          warnings: [`AI_PROVIDER=${requestedProvider} 但未配置 ${missingBaseUrlName}，已自动回退 mock AI。`, ...mock.warnings]
+        }, startedAt, model);
+      }
 
       if (!apiKey) {
         const mock = await mockProvider.classify(frames, context, validateClassification);
@@ -565,7 +597,7 @@ export class MaterialClassifierService {
             requestedProvider,
             actualProvider: "mock",
             provider: requestedProvider,
-            model: config.model,
+            model,
             baseUrl,
             frameCount: frames.length,
             sentFrameCount: 0,
@@ -579,13 +611,13 @@ export class MaterialClassifierService {
             errorType: "missing_api_key"
           },
           warnings: [`AI_PROVIDER=${requestedProvider} 但未配置 ${missingKeyName}，已自动回退 mock AI。`, ...mock.warnings]
-        }, startedAt, config.model);
+        }, startedAt, model);
       }
 
       try {
         const result = await openAiCompatibleProvider.classify(frames, context, {
           provider: requestedProvider,
-          model: config.model,
+          model,
           apiKey,
           baseUrl,
           frameMax: config.frameMax,
@@ -597,7 +629,7 @@ export class MaterialClassifierService {
           validateClassification,
           localizeClassificationText
         });
-        return this.withRunMetadata(result, startedAt, config.model);
+        return this.withRunMetadata(result, startedAt, model);
       } catch (error) {
         const mock = await mockProvider.classify(frames, context, validateClassification);
         const openAiError = summarizeOpenAiError(error);
@@ -609,7 +641,7 @@ export class MaterialClassifierService {
             requestedProvider,
             actualProvider: "mock",
             provider: requestedProvider,
-            model: config.model,
+            model,
             baseUrl,
             frameCount: frames.length,
             sentFrameCount: Math.min(frames.length, config.frameMax),
@@ -623,7 +655,7 @@ export class MaterialClassifierService {
             errorType: openAiError.errorType
           },
           warnings: [`${label} 调用失败，已回退 mock AI：${openAiError.message}`, ...mock.warnings]
-        }, startedAt, config.model);
+        }, startedAt, model);
       }
     }
 
@@ -670,6 +702,35 @@ export class MaterialClassifierService {
       durationMs: Math.max(0, Date.now() - startedAt),
       errorMessage: result.diagnostics?.errorSummary ?? result.errorMessage ?? null
     };
+  }
+
+  private apiKeyForProvider(config: Awaited<ReturnType<typeof aiProviderConfigService.getResolvedConfig>>["config"], provider: OpenAiRequestConfig["provider"]) {
+    if (provider === "volcengine") return config.arkApiKey;
+    if (provider === "local_openai_compatible") return config.localApiKey || config.openaiApiKey || config.arkApiKey;
+    return config.openaiApiKey;
+  }
+
+  private apiKeyNameForProvider(provider: OpenAiRequestConfig["provider"]) {
+    if (provider === "volcengine") return "ARK_API_KEY";
+    if (provider === "local_openai_compatible") return "LOCAL_AI_API_KEY 或 AI_API_KEY";
+    return "OPENAI_API_KEY";
+  }
+
+  private baseUrlForProvider(config: Awaited<ReturnType<typeof aiProviderConfigService.getResolvedConfig>>["config"], provider: OpenAiRequestConfig["provider"]) {
+    if (provider === "volcengine") return config.volcengineBaseUrl;
+    if (provider === "local_openai_compatible") return config.localBaseUrl || config.baseUrl;
+    return config.baseUrl || "https://api.openai.com/v1";
+  }
+
+  private modelForProvider(config: Awaited<ReturnType<typeof aiProviderConfigService.getResolvedConfig>>["config"], provider: OpenAiRequestConfig["provider"]) {
+    if (provider === "local_openai_compatible") return config.localModel || config.model;
+    return config.model;
+  }
+
+  private proxyUrlForProvider(config: Awaited<ReturnType<typeof aiProviderConfigService.getResolvedConfig>>["config"], provider: OpenAiRequestConfig["provider"]) {
+    if (provider === "volcengine") return config.volcengineProxyUrl;
+    if (provider === "local_openai_compatible") return config.openaiProxyUrl;
+    return config.openaiProxyUrl;
   }
 
   async mockClassify(framesOrContext: string[] | ClassifierContext, maybeContext?: ClassifierContext): Promise<ClassifierResult> {
@@ -1215,18 +1276,21 @@ export class MaterialClassifierService {
     apiKey,
     body,
     timeoutMs,
-    proxyUrl
+    proxyUrl,
+    endpointPath = "/responses"
   }: {
     baseUrl: string;
     apiKey: string;
     body: unknown;
     timeoutMs: number;
     proxyUrl?: string;
+    endpointPath?: "/responses" | "/chat/completions";
   }) {
     const payload = JSON.stringify(body);
+    const endpoint = `${baseUrl.replace(/\/$/, "")}${endpointPath}`;
     if (proxyUrl) {
       return this.postJsonThroughHttpProxy({
-        targetUrl: `${baseUrl.replace(/\/$/, "")}/responses`,
+        targetUrl: endpoint,
         apiKey,
         payload,
         timeoutMs,
@@ -1236,7 +1300,6 @@ export class MaterialClassifierService {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new Error(`AI provider 请求超过 ${timeoutMs}ms 未响应`)), timeoutMs);
-    const endpoint = `${baseUrl.replace(/\/$/, "")}/responses`;
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -1407,6 +1470,16 @@ export class MaterialClassifierService {
     }
   }
 
+  shouldRetryChatCompletionsWithJsonObject(status: number, message: string) {
+    const text = message.toLowerCase();
+    return status === 400 && (
+      text.includes("json_schema") ||
+      text.includes("response_format") ||
+      text.includes("strict") ||
+      text.includes("schema")
+    );
+  }
+
   async testOpenAiConnection() {
     return this.testAiConnection();
   }
@@ -1461,17 +1534,6 @@ export class MaterialClassifierService {
       };
     }
 
-    if (isLocalOpenAiCompatibleProvider(config.provider)) {
-      const result = await localHealthcheckService.testLocalOpenAiCompatible({
-        baseUrl: config.localBaseUrl || config.baseUrl,
-        apiKey: config.localApiKey,
-        model: config.localModel || config.model,
-        healthcheckUrl: config.localHealthcheckUrl,
-        timeoutMs: config.requestTimeoutMs
-      });
-      return { ...result, diagnostics: { ...configDiagnostics, ...result.diagnostics } };
-    }
-
     if (isLocalOllamaProvider(config.provider)) {
       const result = await localHealthcheckService.testLocalOllama({
         baseUrl: config.localBaseUrl || config.baseUrl || "http://127.0.0.1:11434",
@@ -1483,12 +1545,12 @@ export class MaterialClassifierService {
       return { ...result, diagnostics: { ...configDiagnostics, ...result.diagnostics } };
     }
 
-    if (config.provider !== "openai" && config.provider !== "volcengine") {
+    if (!isOpenAiCompatibleProvider(config.provider)) {
       return {
         ok: false,
         provider: config.provider,
         model: config.model,
-        message: "当前 AI_PROVIDER 不是 openai 或 volcengine。请先在 .env 设置 AI_PROVIDER=openai 或 AI_PROVIDER=volcengine。",
+        message: "当前 AI_PROVIDER 不是 openai、volcengine 或 local_openai_compatible。",
         diagnostics: {
           ...configDiagnostics,
           requestedProvider: config.provider,
@@ -1507,27 +1569,52 @@ export class MaterialClassifierService {
     }
 
     const requestedProvider = config.provider;
-    const apiKey = requestedProvider === "volcengine" ? config.arkApiKey : config.openaiApiKey;
-    const baseUrl =
-      requestedProvider === "volcengine" ? config.volcengineBaseUrl : config.baseUrl || "https://api.openai.com/v1";
-    const proxyUrl =
-      requestedProvider === "volcengine" ? config.volcengineProxyUrl : config.openaiProxyUrl;
-    const missingKeyName = requestedProvider === "volcengine" ? "ARK_API_KEY" : "OPENAI_API_KEY";
+    const apiKey = this.apiKeyForProvider(config, requestedProvider);
+    const baseUrl = this.baseUrlForProvider(config, requestedProvider);
+    const proxyUrl = this.proxyUrlForProvider(config, requestedProvider);
+    const model = this.modelForProvider(config, requestedProvider);
+    const missingKeyName = this.apiKeyNameForProvider(requestedProvider);
     const label = providerLabel(requestedProvider);
     const endpoint = `${baseUrl.replace(/\/$/, "")}/responses`;
+
+    if (!baseUrl) {
+      return {
+        ok: false,
+        provider: requestedProvider,
+        model,
+        message: requestedProvider === "local_openai_compatible"
+          ? "未配置 LOCAL_AI_BASE_URL 或 AI_BASE_URL。"
+          : "未配置 AI Base URL。",
+        diagnostics: {
+          ...configDiagnostics,
+          requestedProvider,
+          actualProvider: requestedProvider,
+          provider: requestedProvider,
+          model,
+          baseUrl,
+          frameCount: 0,
+          sentFrameCount: 0,
+          imageDetail: config.imageDetail,
+          timeoutMs: config.requestTimeoutMs,
+          proxyEnabled: Boolean(proxyUrl),
+          fallbackUsed: false,
+          errorType: "missing_base_url"
+        }
+      };
+    }
 
     if (!apiKey) {
       return {
         ok: false,
         provider: requestedProvider,
-        model: config.model,
+        model,
         message: `未配置 ${missingKeyName}。`,
         diagnostics: {
           ...configDiagnostics,
           requestedProvider,
           actualProvider: "mock",
           provider: requestedProvider,
-          model: config.model,
+          model,
           baseUrl,
           endpoint,
           frameCount: 0,
@@ -1543,47 +1630,126 @@ export class MaterialClassifierService {
 
     try {
       const imageDataUrl = await this.createTinyTestImageDataUrl();
-      const response = await this.postOpenAiJson({
+      const testSchema = {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ok: { type: "boolean" },
+          summary: { type: "string" }
+        },
+        required: ["ok", "summary"]
+      };
+      const prompt = "请识别这张测试图，并只返回 JSON：{\"ok\":true,\"summary\":\"...\"}";
+      const responsesBody = {
+        model,
+        input: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: prompt
+              },
+              {
+                type: "input_image",
+                detail: config.imageDetail,
+                image_url: imageDataUrl
+              }
+            ]
+          }
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "openai_connection_test",
+            strict: true,
+            schema: testSchema
+          }
+        }
+      };
+      let endpointType: OpenAiEndpointType = "responses";
+      let response = await this.postOpenAiJson({
         baseUrl,
         apiKey,
         timeoutMs: config.requestTimeoutMs,
         proxyUrl,
-        body: {
-          model: config.model,
-          input: [
-            {
-              role: "user",
-              content: [
+        body: responsesBody
+      });
+
+      if (response.status < 200 || response.status >= 300) {
+        if (requestedProvider === "local_openai_compatible") {
+          let chatResponse = await this.postOpenAiJson({
+            baseUrl,
+            apiKey,
+            timeoutMs: config.requestTimeoutMs,
+            proxyUrl,
+            endpointPath: "/chat/completions",
+            body: {
+              model,
+              messages: [
                 {
-                  type: "input_text",
-                  text: "请识别这张测试图，并只返回 JSON：{\"ok\":true,\"summary\":\"...\"}"
-                },
-                {
-                  type: "input_image",
-                  detail: config.imageDetail,
-                  image_url: imageDataUrl
+                  role: "user",
+                  content: [
+                    { type: "text", text: prompt },
+                    {
+                      type: "image_url",
+                      image_url: {
+                        url: imageDataUrl,
+                        detail: config.imageDetail
+                      }
+                    }
+                  ]
                 }
-              ]
-            }
-          ],
-          text: {
-            format: {
-              type: "json_schema",
-              name: "openai_connection_test",
-              strict: true,
-              schema: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  ok: { type: "boolean" },
-                  summary: { type: "string" }
-                },
-                required: ["ok", "summary"]
+              ],
+              response_format: {
+                type: "json_schema",
+                json_schema: {
+                  name: "openai_connection_test",
+                  strict: true,
+                  schema: testSchema
+                }
               }
             }
+          });
+          let chatEndpointType: OpenAiEndpointType = "chat_completions";
+          if (chatResponse.status < 200 || chatResponse.status >= 300) {
+            const chatErrorMessage = this.extractOpenAiErrorMessage(chatResponse.body);
+            if (this.shouldRetryChatCompletionsWithJsonObject(chatResponse.status, chatErrorMessage)) {
+              chatResponse = await this.postOpenAiJson({
+                baseUrl,
+                apiKey,
+                timeoutMs: config.requestTimeoutMs,
+                proxyUrl,
+                endpointPath: "/chat/completions",
+                body: {
+                  model,
+                  messages: [
+                    {
+                      role: "user",
+                      content: [
+                        { type: "text", text: prompt },
+                        {
+                          type: "image_url",
+                          image_url: {
+                            url: imageDataUrl,
+                            detail: config.imageDetail
+                          }
+                        }
+                      ]
+                    }
+                  ],
+                  response_format: { type: "json_object" }
+                }
+              });
+              chatEndpointType = "chat_completions_json_object";
+            }
+          }
+          if (chatResponse.status >= 200 && chatResponse.status < 300) {
+            response = chatResponse;
+            endpointType = chatEndpointType;
           }
         }
-      });
+      }
 
       const requestId = response.headers["x-request-id"] || null;
       if (response.status < 200 || response.status >= 300) {
@@ -1591,14 +1757,14 @@ export class MaterialClassifierService {
         return {
           ok: false,
           provider: requestedProvider,
-          model: config.model,
+          model,
           message: `${label} API ${response.status}: ${errorMessage}`,
           diagnostics: {
             ...configDiagnostics,
             requestedProvider,
             actualProvider: requestedProvider,
             provider: requestedProvider,
-            model: config.model,
+            model,
             baseUrl,
             endpoint,
             frameCount: 1,
@@ -1615,11 +1781,14 @@ export class MaterialClassifierService {
       }
 
       const raw = JSON.parse(response.body) as Record<string, unknown>;
-      const outputText = this.extractOutputText(raw);
+      const isChatCompletionsEndpoint = endpointType === "chat_completions" || endpointType === "chat_completions_json_object";
+      const outputText = isChatCompletionsEndpoint
+        ? this.extractChatOutputText(raw) || this.extractOutputText(raw)
+        : this.extractOutputText(raw);
       return {
         ok: Boolean(outputText),
         provider: requestedProvider,
-        model: config.model,
+        model,
         message: outputText ? `${label} 连接测试成功，模型支持图片输入和结构化输出。` : `${label} 有响应，但未返回可解析文本。`,
         outputText,
         diagnostics: {
@@ -1627,9 +1796,9 @@ export class MaterialClassifierService {
           requestedProvider,
           actualProvider: requestedProvider,
           provider: requestedProvider,
-          model: config.model,
+          model,
           baseUrl,
-          endpoint,
+          endpoint: endpointType === "chat_completions" ? `${baseUrl.replace(/\/$/, "")}/chat/completions` : endpoint,
           frameCount: 1,
           sentFrameCount: 1,
           imageDetail: config.imageDetail,
@@ -1638,7 +1807,12 @@ export class MaterialClassifierService {
           requestId,
           status: response.status,
           fallbackUsed: false,
-          errorType: outputText ? undefined : "schema_or_json_parse_failed"
+          errorType: outputText ? undefined : "schema_or_json_parse_failed",
+          note: endpointType === "chat_completions"
+            ? "中转站未使用 Responses API，已自动兼容 Chat Completions。"
+            : endpointType === "chat_completions_json_object"
+              ? "中转站未使用 Responses API 或 strict JSON Schema，已自动兼容 Chat Completions JSON Object。"
+              : undefined
         }
       };
     } catch (error) {
@@ -1646,14 +1820,14 @@ export class MaterialClassifierService {
       return {
         ok: false,
         provider: requestedProvider,
-        model: config.model,
+        model,
         message: openAiError.message,
         diagnostics: {
           ...configDiagnostics,
           requestedProvider,
           actualProvider: requestedProvider,
           provider: requestedProvider,
-          model: config.model,
+          model,
           baseUrl,
           endpoint,
           frameCount: 1,
@@ -1705,6 +1879,22 @@ export class MaterialClassifierService {
       }
     }
 
+    return null;
+  }
+
+  extractChatOutputText(response: Record<string, unknown>) {
+    const choices = response.choices;
+    if (!Array.isArray(choices)) return null;
+    for (const choice of choices) {
+      const message = (choice as { message?: unknown }).message;
+      const content = (message as { content?: unknown } | undefined)?.content;
+      if (typeof content === "string") return content;
+      if (!Array.isArray(content)) continue;
+      for (const item of content) {
+        const text = (item as { text?: unknown }).text;
+        if (typeof text === "string") return text;
+      }
+    }
     return null;
   }
 

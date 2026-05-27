@@ -107,6 +107,14 @@ AI_IMAGE_DETAIL=low
 AI_REQUEST_TIMEOUT_MS=60000
 ```
 
+使用 OpenAI-compatible 中转站时，可以登录后台进入“系统设置 / AI 配置”新建 `OpenAI-compatible 中转站` 配置。需要填写：
+
+- 中转站 Base URL：通常要带 `/v1`，例如 `https://your-relay.example.com/v1`
+- 中转站 API Key：填写中转站提供的 key
+- 中转站模型：填写中转站支持图片输入的模型名
+
+系统会优先调用 `/responses`；如果中转站不支持，会自动兼容 `/chat/completions`。
+
 首次初始化超级管理员可选配置：
 
 ```bash
