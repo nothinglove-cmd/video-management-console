@@ -230,6 +230,15 @@ async function main() {
     add("warn", "SQLite", "prisma/dev.db does not exist yet. Run npm run db:push after backing up existing data if needed.");
   }
 
+  const authSecret = env.AUTH_SECRET || "";
+  if (!authSecret) {
+    add("fail", "AUTH_SECRET", "AUTH_SECRET is not configured.");
+  } else if (authSecret.length < 32) {
+    add("fail", "AUTH_SECRET", "AUTH_SECRET must be at least 32 characters.");
+  } else {
+    add("pass", "AUTH_SECRET", "AUTH_SECRET is configured.");
+  }
+
   const storageRoot = env.STORAGE_ROOT || "";
   if (!storageRoot) {
     add("fail", "STORAGE_ROOT", "STORAGE_ROOT is not configured.");

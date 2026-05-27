@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getRouteId, jsonError, readJson, requireMaterial } from "@/app/api/_utils";
-import { normalizeOperatorName } from "@/lib/operator/operator-context";
+import { authOperatorName, getRouteId, jsonError, readJson, requireMaterial, requireAdmin } from "@/app/api/_utils";
 import { prisma } from "@/lib/prisma";
 import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import { ingestionPipeline } from "@/modules/ingestion/ingestion.pipeline";
@@ -11,13 +10,15 @@ export const runtime = "nodejs";
 const ACTIONS = ["USE_USER_SELECTION", "USE_AI_SUGGESTION", "MANUAL_DIRECTORY"] as const;
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const id = await getRouteId(context);
   const body = await readJson<{
     action?: (typeof ACTIONS)[number];
     categoryId?: string;
     rootCategory?: string;
     subCategory?: string;
-    operatorName?: string;
   }>(request);
   if (!body.action || !ACTIONS.includes(body.action)) return jsonError("请选择有效的冲突处理方式。");
   const material = await requireMaterial(id);
@@ -45,7 +46,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     category,
     rootCategory: body.rootCategory,
     subCategory: body.subCategory,
-    operatorName: normalizeOperatorName(body.operatorName)
+    operatorName: authOperatorName(auth.user)
   });
   return NextResponse.json(toJsonSafe({ material: updated }));
 }

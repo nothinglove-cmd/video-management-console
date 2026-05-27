@@ -1,10 +1,12 @@
 import { CategoryAdmin } from "@/components/admin/category-admin";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
+import { requirePageRole } from "@/lib/auth/page-guards";
 
 export const dynamic = "force-dynamic";
 
-export default function CategoriesPage() {
+export default async function CategoriesPage() {
+  await requirePageRole("SUPER_ADMIN");
   return (
     <AppShell>
       <PageHeader

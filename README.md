@@ -26,6 +26,7 @@
 - 素材库：按栏目、状态、标签、拍摄人、置信度和问题标记搜索素材。
 - 栏目管理：维护逻辑栏目和真实物理目录之间的映射。
 - 本地存储巡检：检查数据库、metadata、源文件和派生文件的一致性。
+- 本地用户权限：超级管理员、管理员、普通用户三层角色，普通用户只读素材库。
 - 私有化部署：默认 SQLite + 本地/NAS 存储，不依赖云端 SaaS 账号体系。
 
 ## 界面预览
@@ -54,6 +55,17 @@ video-ingestion-mvp/              # Next.js 应用主目录
 
 ## 快速启动
 
+普通用户全新安装建议直接使用安装脚本：
+
+- Windows：进入 `video-ingestion-mvp` 后双击 `安装-windows.bat`
+- macOS：进入 `video-ingestion-mvp` 后双击 `安装-mac.command`
+- Ubuntu / Linux：进入 `video-ingestion-mvp` 后运行 `./install/bootstrap-mac-linux.sh`
+
+安装器会自动下载项目专用 Node.js、项目依赖和 FFmpeg，只需要选择素材存储目录。AI Key 和模型可以进入系统后再配置。
+安装完成后会显示初始超级管理员账号和随机密码，首次登录后需要修改密码。
+
+开发调试可使用下面的命令：
+
 ```bash
 cd video-ingestion-mvp
 npm install
@@ -65,10 +77,10 @@ npm run typecheck
 npm run dev
 ```
 
-开发服务默认监听 `0.0.0.0:3000`，手机可通过同一局域网访问：
+开发服务默认监听 `0.0.0.0:8888`，手机可通过同一局域网访问：
 
 ```text
-http://你的电脑局域网IP:3000/mobile/upload
+http://你的电脑局域网IP:8888/mobile/upload
 ```
 
 更完整的运行说明见 [video-ingestion-mvp/README.md](video-ingestion-mvp/README.md)。
@@ -78,7 +90,7 @@ http://你的电脑局域网IP:3000/mobile/upload
 - 不提交 `.env`、API Key、真实数据库、数据库备份、真实素材文件和构建产物。
 - 本地默认数据库是 `video-ingestion-mvp/prisma/dev.db`，由 `npm run db:push` 创建。
 - AI provider 建议先用 `AI_PROVIDER=mock` 跑通本地流程，再配置 OpenAI、火山方舟或本地兼容服务。
-- 第一版偏本地私有化部署，不是 SaaS，多用户权限、支付、云托管等能力不在当前版本范围。
+- 第一版偏本地私有化部署，不是 SaaS；已包含本地账号和基础三层权限，但不包含支付、云托管和复杂多租户能力。
 
 ## License
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { AssetType } from "@prisma/client";
 
-import { getRouteId, jsonError, readJson, requireMaterial } from "@/app/api/_utils";
+import { authOperatorName, getRouteId, jsonError, readJson, requireMaterial, requireAdmin } from "@/app/api/_utils";
 import { prisma } from "@/lib/prisma";
 import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
@@ -11,12 +11,14 @@ export const runtime = "nodejs";
 const ASSET_TYPES = ["ACCOUNT_MATERIAL", "PRODUCT_MATERIAL", "REFERENCE_VIDEO", "PUBLIC_RESOURCE", "UNKNOWN"];
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const id = await getRouteId(context);
   const body = await readJson<{
     categoryId?: string;
     assetType?: AssetType;
     category?: string;
-    operatorName?: string;
     notes?: string;
   }>(request);
   const material = await requireMaterial(id);
@@ -42,7 +44,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       targetAssetType: category.assetType,
       targetCategory: category.relativePath,
       targetCategoryRecord: category,
-      operatorName: body.operatorName,
+      operatorName: authOperatorName(auth.user),
       notes: body.notes
     });
     return NextResponse.json(toJsonSafe({ material: updated }));
@@ -54,7 +56,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     material,
     targetAssetType: body.assetType,
     targetCategory: body.category,
-    operatorName: body.operatorName,
+    operatorName: authOperatorName(auth.user),
     notes: body.notes
   });
   return NextResponse.json(toJsonSafe({ material: updated }));

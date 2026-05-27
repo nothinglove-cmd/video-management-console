@@ -7,11 +7,13 @@ import { SystemResetPanel } from "@/components/settings/system-reset-panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { Surface } from "@/components/ui/surface";
 import { skin } from "@/components/theme/skin";
+import { requirePageRole } from "@/lib/auth/page-guards";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default function MaintenanceSettingsPage() {
+export default async function MaintenanceSettingsPage() {
+  await requirePageRole("SUPER_ADMIN");
   return (
     <AppShell>
       <PageHeader

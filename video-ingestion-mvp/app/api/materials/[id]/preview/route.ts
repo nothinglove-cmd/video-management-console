@@ -2,15 +2,19 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import { Readable } from "node:stream";
 
-import { getRouteId, requireMaterial } from "@/app/api/_utils";
+import { canReadMaterial, getRouteId, materialReadDeniedResponse, requireMaterial, requireApiUser } from "@/app/api/_utils";
 import { derivativeService } from "@/lib/media/derivative.service";
 import { storageService } from "@/lib/storage/storage.service";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const auth = await requireApiUser(request);
+  if ("response" in auth) return auth.response;
+
   const id = await getRouteId(context);
   const material = await requireMaterial(id);
+  if (!canReadMaterial(auth.user, material)) return materialReadDeniedResponse();
   const preview = await resolvePreviewSource(material.materialId);
   const absolutePath = preview?.absolutePath || await storageService.getDownloadPath(material);
   const contentType = preview?.mimeType || material.mimeType || "application/octet-stream";

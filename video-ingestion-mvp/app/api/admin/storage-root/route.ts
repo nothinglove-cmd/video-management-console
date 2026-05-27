@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { requireSuperAdmin } from "@/app/api/_utils";
+
 import {
   applyStorageRoot,
   getStorageRootStatus,
@@ -9,7 +11,10 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireSuperAdmin(request);
+  if ("response" in auth) return auth.response;
+
   try {
     const data = await getStorageRootStatus();
     return NextResponse.json({
@@ -34,6 +39,9 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const auth = await requireSuperAdmin(request);
+  if ("response" in auth) return auth.response;
+
   try {
     const body = await request.json().catch(() => ({}));
     const rootPath = typeof body?.rootPath === "string" ? body.rootPath : "";

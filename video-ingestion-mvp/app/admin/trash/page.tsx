@@ -1,8 +1,10 @@
 import { MaterialAdmin } from "@/components/admin/material-admin";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
+import { requirePageRole } from "@/lib/auth/page-guards";
 
-export default function TrashPage() {
+export default async function TrashPage() {
+  await requirePageRole("ADMIN");
   return (
     <AppShell>
       <PageHeader

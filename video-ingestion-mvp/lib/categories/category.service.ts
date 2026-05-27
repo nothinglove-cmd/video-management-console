@@ -109,8 +109,8 @@ export async function ensureDefaultCategories() {
   }
 }
 
-export async function listCategories() {
-  await ensureDefaultCategories();
+export async function listCategories(options: { ensureDefaults?: boolean } = {}) {
+  if (options.ensureDefaults !== false) await ensureDefaultCategories();
   const categories = await prisma.category.findMany({
     where: { NOT: { status: "DELETED" } },
     orderBy: [{ depth: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],

@@ -3,12 +3,19 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Home, Menu, Search, X } from "lucide-react";
+import { Home, LogOut, Menu, Search, X } from "lucide-react";
+import type { UserRole } from "@prisma/client";
 
 import { Sidebar } from "@/components/layout/sidebar";
 import { skin } from "@/components/theme/skin";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+type CurrentUser = {
+  username: string;
+  displayName: string;
+  role: UserRole;
+};
 
 export function AppShell({
   children,
@@ -21,11 +28,19 @@ export function AppShell({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(mobileSearchMode === "inline");
   const [globalQuery, setGlobalQuery] = useState("");
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     const stored = window.localStorage.getItem("video-ingestion.sidebar.collapsed");
     setSidebarCollapsed(stored === "true");
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { user?: CurrentUser | null }) => setCurrentUser(data.user || null))
+      .catch(() => setCurrentUser(null));
   }, []);
 
   function toggleSidebarCollapsed() {
@@ -42,11 +57,19 @@ export function AppShell({
     router.push(query ? `/admin/library?q=${encodeURIComponent(query)}&scope=all` : "/admin/library");
   }
 
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    router.replace("/login");
+    router.refresh();
+  }
+
   return (
     <div style={skin.vars} className={skin.page}>
       <Sidebar
         mobileOpen={mobileOpen}
         collapsed={sidebarCollapsed && !mobileOpen}
+        user={currentUser}
+        onLogout={logout}
         onToggleCollapsed={toggleSidebarCollapsed}
         onNavigate={() => setMobileOpen(false)}
       />
@@ -119,12 +142,15 @@ export function AppShell({
             </Button>
             <div className="hidden shrink-0 items-center gap-3 text-sm lg:flex">
               <div className="h-8 w-8 rounded-[var(--skin-radius-full)] bg-primary text-center text-xs font-bold leading-8 text-primary-foreground shadow-[var(--skin-shadow-card)]">
-                管
+                {(currentUser?.displayName || currentUser?.username || "用").slice(0, 1)}
               </div>
-              <div>
-                <p className="font-semibold">本地管理员</p>
-                <p className="text-xs text-muted-foreground">当前操作员</p>
+              <div className="min-w-0">
+                <p className="max-w-32 truncate font-semibold">{currentUser?.displayName || currentUser?.username || "未登录"}</p>
+                <p className="text-xs text-muted-foreground">{currentUser ? ROLE_LABELS[currentUser.role] : "访客"}</p>
               </div>
+              <Button variant="ghost" size="sm" className="h-9 w-9 shrink-0 p-0" onClick={logout} aria-label="退出登录">
+                <LogOut className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </header>
@@ -133,3 +159,9 @@ export function AppShell({
     </div>
   );
 }
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  SUPER_ADMIN: "超级管理员",
+  ADMIN: "管理员",
+  USER: "普通用户"
+};

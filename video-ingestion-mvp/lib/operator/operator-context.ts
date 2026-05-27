@@ -1,6 +1,6 @@
 export const DEFAULT_OPERATOR = {
-  id: "local-admin",
-  name: "本地管理员",
+  id: "system",
+  name: "系统",
   role: "LOCAL_OPERATOR"
 } as const;
 

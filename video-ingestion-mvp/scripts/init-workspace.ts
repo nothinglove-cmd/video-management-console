@@ -1,4 +1,5 @@
 import { ensureDefaultWorkspace } from "../lib/workspace/default-workspace.service";
+import { ensureBootstrapSuperAdmin } from "../lib/auth/bootstrap-admin";
 import { prisma } from "../lib/prisma";
 
 async function main() {
@@ -12,6 +13,16 @@ async function main() {
   console.log(`TerminologyPack: ${result.terminologyPack.code} (${result.terminologyPack.id})`);
   console.log(`IndustryTemplate: ${result.industryTemplate.code} (${result.industryTemplate.id})`);
   console.log(`STORAGE_ROOT: ${result.storageRoot}`);
+
+  const admin = await ensureBootstrapSuperAdmin();
+  if (admin.created) {
+    console.log("Initial SUPER_ADMIN created.");
+    console.log(`Username: ${admin.username}`);
+    console.log(`Password: ${admin.password}`);
+    console.log("Please save this password and change it after first login.");
+  } else {
+    console.log(`SUPER_ADMIN already exists: ${admin.username}`);
+  }
 }
 
 main()

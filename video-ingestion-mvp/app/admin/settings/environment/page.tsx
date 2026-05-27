@@ -5,11 +5,13 @@ import { EnvironmentAccessPanel } from "@/components/settings/environment-access
 import { SectionPanel, SettingsBackLink } from "@/components/settings/settings-page-parts";
 import { StatusPill } from "@/components/ui/status-pill";
 import { getEnvironmentStatus } from "@/lib/admin/environment-status.service";
+import { requirePageRole } from "@/lib/auth/page-guards";
 import { getNetworkAccessInfo } from "@/lib/network/access-info";
 
 export const dynamic = "force-dynamic";
 
 export default async function EnvironmentSettingsPage() {
+  await requirePageRole("SUPER_ADMIN");
   const environmentStatus = await getEnvironmentStatus();
   const accessInfo = getNetworkAccessInfo();
   const ready = environmentStatus.mediaTools.ffmpeg.available && environmentStatus.mediaTools.ffprobe.available;

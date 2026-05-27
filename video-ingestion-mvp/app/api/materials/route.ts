@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { isAdminUser, requireApiUser } from "@/app/api/_utils";
+
 import { prisma } from "@/lib/prisma";
 import { buildMaterialWhere } from "@/lib/search/material-search.service";
 import { toJsonSafe } from "@/lib/serialization/bigint-json";
@@ -14,15 +16,25 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const auth = await requireApiUser(request);
+  if ("response" in auth) return auth.response;
+
   try {
-    await storageService.initializeStorage();
-    ingestionQueueService.kick();
     const url = new URL(request.url);
-    const trash = url.searchParams.get("trash") === "1";
+    const adminUser = isAdminUser(auth.user);
+    if (adminUser) {
+      await storageService.initializeStorage();
+      ingestionQueueService.kick();
+    }
+    const requestedScope = url.searchParams.get("scope");
+    const trash = adminUser && url.searchParams.get("trash") === "1";
+    const scope = adminUser
+      ? trash ? "trash" : requestedScope
+      : "library";
     const searchParams = {
       q: url.searchParams.get("q"),
-      scope: trash ? "trash" : url.searchParams.get("scope"),
-      status: url.searchParams.get("status"),
+      scope,
+      status: adminUser ? url.searchParams.get("status") : safeUserStatus(url.searchParams.get("status")),
       assetType: url.searchParams.get("assetType"),
       rootCategory: url.searchParams.get("rootCategory"),
       subCategory: url.searchParams.get("subCategory"),
@@ -32,7 +44,7 @@ export async function GET(request: Request) {
       from: url.searchParams.get("from"),
       to: url.searchParams.get("to"),
       ingestSource: url.searchParams.get("ingestSource"),
-      includeTrash: url.searchParams.get("includeTrash"),
+      includeTrash: adminUser ? url.searchParams.get("includeTrash") : null,
       categoryPrefix: url.searchParams.get("categoryPrefix"),
       categoryId: url.searchParams.get("categoryId"),
       categoryIds: await getCategorySubtreeIds(url.searchParams.get("categoryId")),
@@ -165,6 +177,10 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
+}
+
+function safeUserStatus(status: string | null) {
+  return status === "READY" || status === "IMPORTED" ? status : null;
 }
 
 async function getCategorySubtreeIds(categoryId?: string | null) {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { ShooterStatus } from "@prisma/client";
 
-import { getRouteId, jsonError, readJson } from "@/app/api/_utils";
+import { getRouteId, jsonError, readJson, requireAdmin } from "@/app/api/_utils";
 import { softDeleteShooter, updateShooter } from "@/lib/shooters/shooter.service";
 
 export const runtime = "nodejs";
@@ -10,6 +10,9 @@ export const dynamic = "force-dynamic";
 const STATUSES: ShooterStatus[] = ["ACTIVE", "DISABLED", "DELETED"];
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const id = await getRouteId(context);
   const body = await readJson<{
     name?: string;
@@ -23,7 +26,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   return NextResponse.json({ shooter });
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const id = await getRouteId(context);
   const shooter = await softDeleteShooter(id);
   return NextResponse.json({ shooter });

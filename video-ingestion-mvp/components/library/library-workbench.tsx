@@ -2,6 +2,7 @@
 
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
+import type { UserRole } from "@prisma/client";
 import {
   CheckCircle2,
   ChevronDown,
@@ -64,6 +65,12 @@ type ApiPayload = {
   pagination?: PaginationDto;
 };
 
+type CurrentUser = {
+  username: string;
+  displayName: string;
+  role: UserRole;
+};
+
 type DirectorySelection =
   | { type: "all"; label: string }
   | { type: "recent"; label: string }
@@ -123,14 +130,17 @@ export function LibraryWorkbench() {
   const [busy, setBusy] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileDirectoryOpen, setMobileDirectoryOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const pagination = payload.pagination || DEFAULT_PAGINATION;
   const materials = payload.materials;
+  const canManageMaterials = currentUser?.role === "SUPER_ADMIN" || currentUser?.role === "ADMIN";
   const uploaders = payload.facets?.uploaders || [];
   const categoryPrefix = selection.type === "category" ? selection.category.relativePath || "" : "";
   const selectedCategoryId = selection.type === "category" ? selection.category.id : "";
 
   useEffect(() => {
     loadCategories().catch((error) => setMessage(error.message));
+    loadCurrentUser().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -154,10 +164,16 @@ export function LibraryWorkbench() {
   }, [materials, activeMaterial?.id]);
 
   async function loadCategories() {
-    const response = await fetch("/api/admin/categories", { cache: "no-store" });
+    const response = await fetch("/api/categories", { cache: "no-store" });
     const data = await response.json().catch(() => null) as { categories?: CategoryNodeDto[]; error?: string } | null;
     if (!response.ok || !data) throw new Error(data?.error || "栏目配置加载失败。");
     setCategories(data.categories || []);
+  }
+
+  async function loadCurrentUser() {
+    const response = await fetch("/api/auth/me", { cache: "no-store" });
+    const data = await response.json().catch(() => null) as { user?: CurrentUser | null } | null;
+    setCurrentUser(data?.user || null);
   }
 
   async function refresh() {
@@ -234,25 +250,31 @@ export function LibraryWorkbench() {
       setMessage("请先选择素材。");
       return;
     }
+    if (!canManageMaterials) {
+      setMessage("当前账号只有素材库只读权限。");
+      return;
+    }
     if (action === "move") {
       const first = materials.find((item) => item.id === selectedIds[0]);
       if (first) setDialog({ type: "batchMove", material: first });
       return;
     }
-    await post("/api/materials/batch", { action, ids: selectedIds, operatorName: "本地管理员" });
+    await post("/api/materials/batch", { action, ids: selectedIds });
     setSelectedIds([]);
   }
 
-  const drawerActions: MaterialActions = {
-    rename: (material) => handleAction("rename", material),
-    move: (material) => handleAction("move", material),
-    editTags: (material) => handleAction("tags", material),
-    trash: (material) => handleAction("trash", material),
-    reanalyze: (material) => handleAction("reanalyze", material),
-    applyAiSuggestion: (material) => handleAction("applyAiSuggestion", material),
-    confirm: (material) => handleAction("confirm", material),
-    addToPackage: (material) => handleAction("package", material)
-  };
+  const drawerActions: MaterialActions = canManageMaterials
+    ? {
+        rename: (material) => handleAction("rename", material),
+        move: (material) => handleAction("move", material),
+        editTags: (material) => handleAction("tags", material),
+        trash: (material) => handleAction("trash", material),
+        reanalyze: (material) => handleAction("reanalyze", material),
+        applyAiSuggestion: (material) => handleAction("applyAiSuggestion", material),
+        confirm: (material) => handleAction("confirm", material),
+        addToPackage: (material) => handleAction("package", material)
+      }
+    : {};
 
   return (
     <div
@@ -347,6 +369,7 @@ export function LibraryWorkbench() {
               onOpen={setActiveMaterial}
               onPreview={setPreviewMaterial}
               onAction={handleAction}
+              canManage={canManageMaterials}
             />
           ) : (
             <MaterialGrid
@@ -358,6 +381,7 @@ export function LibraryWorkbench() {
               onOpen={setActiveMaterial}
               onPreview={setPreviewMaterial}
               onAction={handleAction}
+              canManage={canManageMaterials}
             />
           )
         ) : null}
@@ -383,7 +407,7 @@ export function LibraryWorkbench() {
         onPreview={setPreviewMaterial}
       />
 
-      {selectedIds.length > 0 ? (
+      {canManageMaterials && selectedIds.length > 0 ? (
         <BatchActionBar
           count={selectedIds.length}
           onMove={() => batch("move")}
@@ -421,14 +445,18 @@ export function LibraryWorkbench() {
   );
 
   function handleAction(action: string, material: MaterialDto) {
+    if (!canManageMaterials && action !== "preview") {
+      setMessage("当前账号只有素材库只读权限。");
+      return;
+    }
     if (action === "rename") setDialog({ type: "rename", material });
     if (action === "move") setDialog({ type: "move", material });
     if (action === "tags") setDialog({ type: "tags", material });
     if (action === "trash") setDialog({ type: "trash", material });
     if (action === "preview") setPreviewMaterial(material);
     if (action === "reanalyze") void post(`/api/materials/${material.id}/reanalyze`);
-    if (action === "applyAiSuggestion") void post(`/api/materials/${material.id}/apply-ai-suggestion`, { operatorName: "本地管理员" });
-    if (action === "confirm") void post(`/api/materials/${material.id}/confirm`, { operatorName: "本地管理员" });
+    if (action === "applyAiSuggestion") void post(`/api/materials/${material.id}/apply-ai-suggestion`);
+    if (action === "confirm") void post(`/api/materials/${material.id}/confirm`);
     if (action === "package") setMessage("加入精选包是占位功能，后续阶段实现。");
   }
 
@@ -439,7 +467,7 @@ export function LibraryWorkbench() {
           material={current.material}
           onClose={() => setDialog(null)}
           onSubmit={async (fileName) => {
-            await post(`/api/materials/${current.material.id}/rename`, { fileName, operatorName: "本地管理员" });
+            await post(`/api/materials/${current.material.id}/rename`, { fileName });
             setDialog(null);
           }}
         />
@@ -455,8 +483,7 @@ export function LibraryWorkbench() {
             await post(`/api/materials/${current.material.id}/move`, {
               categoryId: category?.id,
               assetType: rootCategory,
-              category: directory,
-              operatorName: "本地管理员"
+              category: directory
             });
             setDialog(null);
           }}
@@ -475,8 +502,7 @@ export function LibraryWorkbench() {
               action: "move",
               ids: selectedIds,
               targetAssetType: rootCategory,
-              targetCategory: directory,
-              operatorName: "本地管理员"
+              targetCategory: directory
             });
             setSelectedIds([]);
             setDialog(null);
@@ -490,7 +516,7 @@ export function LibraryWorkbench() {
           material={current.material}
           onClose={() => setDialog(null)}
           onSubmit={async (payload) => {
-            await post(`/api/materials/${current.material.id}/tags`, { ...payload, humanConfirmed: true, operatorName: "本地管理员" });
+            await post(`/api/materials/${current.material.id}/tags`, { ...payload, humanConfirmed: true });
             setDialog(null);
           }}
         />
@@ -505,7 +531,7 @@ export function LibraryWorkbench() {
         tone="danger"
         onClose={() => setDialog(null)}
         onConfirm={async () => {
-          await post(`/api/materials/${current.material.id}/trash`, { operatorName: "本地管理员" });
+          await post(`/api/materials/${current.material.id}/trash`);
           setDialog(null);
         }}
       />
@@ -828,6 +854,7 @@ function MaterialGrid(props: {
   view: Exclude<ViewMode, "table">;
   selectedIds: string[];
   activeId?: string;
+  canManage: boolean;
   onSelect: (id: string, checked: boolean) => void;
   onOpen: (material: MaterialDto) => void;
   onPreview: (material: MaterialDto) => void;
@@ -848,6 +875,7 @@ function LibraryMaterialCard({
   view,
   selectedIds,
   activeId,
+  canManage,
   onSelect,
   onOpen,
   onPreview,
@@ -857,6 +885,7 @@ function LibraryMaterialCard({
   view: Exclude<ViewMode, "table">;
   selectedIds: string[];
   activeId?: string;
+  canManage: boolean;
   onSelect: (id: string, checked: boolean) => void;
   onOpen: (material: MaterialDto) => void;
   onPreview: (material: MaterialDto) => void;
@@ -886,12 +915,14 @@ function LibraryMaterialCard({
             <span className="rounded-full bg-black/55 p-2 text-white"><Play className="h-4 w-4 fill-current" /></span>
           </span>
         </button>
-        <input
-          className="absolute left-2 top-2 h-5 w-5 rounded border-white shadow"
-          type="checkbox"
-          checked={selected}
-          onChange={(event) => onSelect(material.id, event.target.checked)}
-        />
+        {canManage ? (
+          <input
+            className="absolute left-2 top-2 h-5 w-5 rounded border-white shadow"
+            type="checkbox"
+            checked={selected}
+            onChange={(event) => onSelect(material.id, event.target.checked)}
+          />
+        ) : null}
         <span className={cn("absolute right-2 top-2 rounded-[var(--skin-radius-sm)] bg-black/70 px-1.5 py-0.5 font-medium text-white", skin.typography.badge)}>{formatDuration(material.duration)}</span>
       </div>
       <div className={cn("block min-w-0 w-full text-left", compact ? "p-2" : "p-3")} onClick={() => onOpen(material)}>
@@ -900,7 +931,7 @@ function LibraryMaterialCard({
             <p className={cn("truncate", skin.textDensity.id)}>{material.materialId}</p>
             <p className={cn("mt-1 min-w-0 break-words line-clamp-2", skin.textDensity.cardFileName)}>{material.storedFileName}</p>
           </div>
-          {!compact ? <MaterialActionMenu material={material} onAction={onAction} /> : null}
+          {!compact ? <MaterialActionMenu material={material} onAction={onAction} canManage={canManage} /> : null}
         </div>
         <div className={cn("mt-2 flex min-w-0 flex-wrap items-center gap-1.5", compact && "mt-1")}>
           <StatusPill tone={materialStatusTone(material.status)} className={compact ? "px-1.5 py-0" : undefined}>{materialStatusLabel(material.status)}</StatusPill>
@@ -915,8 +946,16 @@ function LibraryMaterialCard({
   );
 }
 
-function MaterialActionMenu({ material, onAction }: { material: MaterialDto; onAction: (action: string, material: MaterialDto) => void }) {
-  const items = getMaterialActionItems(material, onAction);
+function MaterialActionMenu({
+  material,
+  onAction,
+  canManage
+}: {
+  material: MaterialDto;
+  onAction: (action: string, material: MaterialDto) => void;
+  canManage: boolean;
+}) {
+  const items = getMaterialActionItems(material, onAction, canManage);
   return (
     <ActionMenu
       items={items}
@@ -941,23 +980,24 @@ function MaterialActionMenu({ material, onAction }: { material: MaterialDto; onA
   );
 }
 
-function getMaterialActionItems(material: MaterialDto, onAction: (action: string, material: MaterialDto) => void): ActionMenuItem[] {
+function getMaterialActionItems(material: MaterialDto, onAction: (action: string, material: MaterialDto) => void, canManage: boolean): ActionMenuItem[] {
   return [
     { label: "预览", icon: Play, onSelect: () => onAction("preview", material), tone: "primary" },
-    { label: "应用建议", icon: CheckCircle2, onSelect: () => onAction("applyAiSuggestion", material), tone: "primary" },
-    { label: "改名", icon: FilePenLine, onSelect: () => onAction("rename", material) },
-    { label: "分类", icon: FolderInput, onSelect: () => onAction("move", material) },
-    { label: "标签", icon: Tags, onSelect: () => onAction("tags", material) },
-    { label: "重新识别", icon: RefreshCcw, onSelect: () => onAction("reanalyze", material) },
-    { label: "精选包", icon: PackagePlus, onSelect: () => onAction("package", material) },
+    canManage ? { label: "应用建议", icon: CheckCircle2, onSelect: () => onAction("applyAiSuggestion", material), tone: "primary" } : null,
+    canManage ? { label: "改名", icon: FilePenLine, onSelect: () => onAction("rename", material) } : null,
+    canManage ? { label: "分类", icon: FolderInput, onSelect: () => onAction("move", material) } : null,
+    canManage ? { label: "标签", icon: Tags, onSelect: () => onAction("tags", material) } : null,
+    canManage ? { label: "重新识别", icon: RefreshCcw, onSelect: () => onAction("reanalyze", material) } : null,
+    canManage ? { label: "精选包", icon: PackagePlus, onSelect: () => onAction("package", material) } : null,
     { label: "下载", icon: Download, href: `/api/materials/${material.id}/download` },
-    { label: "删除", icon: Trash2, onSelect: () => onAction("trash", material), tone: "danger" }
-  ];
+    canManage ? { label: "删除", icon: Trash2, onSelect: () => onAction("trash", material), tone: "danger" } : null
+  ].filter(Boolean) as ActionMenuItem[];
 }
 
 function LibraryTable(props: {
   materials: MaterialDto[];
   selectedIds: string[];
+  canManage: boolean;
   onSelect: (id: string, checked: boolean) => void;
   onOpen: (material: MaterialDto) => void;
   onPreview: (material: MaterialDto) => void;
@@ -968,7 +1008,7 @@ function LibraryTable(props: {
       <table className={cn("w-full min-w-[980px]", skin.typography.tableCell)}>
         <thead className={cn(skin.table.header, "sticky top-0 z-10")}>
           <tr>
-            <th className="w-12 px-3 py-2 text-left">选择</th>
+            {props.canManage ? <th className="w-12 px-3 py-2 text-left">选择</th> : null}
             <th className="px-3 py-2 text-left">缩略图</th>
             <th className="px-3 py-2 text-left">{terms.material.idLabel}</th>
             <th className="px-3 py-2 text-left">文件名</th>
@@ -984,7 +1024,7 @@ function LibraryTable(props: {
         <tbody>
           {props.materials.map((material) => (
             <tr key={material.id} className={skin.table.row}>
-              <td className="px-3 py-2 align-middle"><input className="h-4 w-4" type="checkbox" checked={props.selectedIds.includes(material.id)} onChange={(event) => props.onSelect(material.id, event.target.checked)} /></td>
+              {props.canManage ? <td className="px-3 py-2 align-middle"><input className="h-4 w-4" type="checkbox" checked={props.selectedIds.includes(material.id)} onChange={(event) => props.onSelect(material.id, event.target.checked)} /></td> : null}
               <td className="px-3 py-2">
                 <button type="button" className={cn(skin.media.thumbnail, "h-14 w-20")} onClick={() => props.onPreview(material)}>
                   {material.thumbnailPath ? (
@@ -1003,7 +1043,7 @@ function LibraryTable(props: {
               <td className="px-3 py-2"><ConfidenceBadge value={material.aiConfidence} /></td>
               <td className="px-3 py-2"><StatusPill tone={materialStatusTone(material.status)}>{materialStatusLabel(material.status)}</StatusPill></td>
               <td className={cn("whitespace-nowrap px-3 py-2", skin.textDensity.technical)}>{toLocalDateTime(material.createdAt)}</td>
-              <td className="px-3 py-2"><MaterialActionMenu material={material} onAction={props.onAction} /></td>
+              <td className="px-3 py-2"><MaterialActionMenu material={material} onAction={props.onAction} canManage={props.canManage} /></td>
             </tr>
           ))}
         </tbody>
@@ -1072,7 +1112,7 @@ function MaterialDetailPanel({
         <div className="flex gap-2 border-t p-4">
           <Button variant="secondary" className="flex-1" onClick={() => onPreview(material)}>预览</Button>
           <Button className="flex-1" onClick={() => onAction("tags", material)}>编辑</Button>
-          <div className="flex-1"><MaterialActionMenu material={material} onAction={onAction} /></div>
+          <div className="flex-1"><MaterialActionMenu material={material} onAction={onAction} canManage /></div>
         </div>
       </div>
     </aside>

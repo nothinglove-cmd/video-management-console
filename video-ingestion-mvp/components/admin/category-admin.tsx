@@ -45,8 +45,6 @@ type FormState = {
   notes: string;
 };
 
-const OPERATOR = "本地管理员";
-
 export function CategoryAdmin() {
   const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [selectedRootId, setSelectedRootId] = useState("");
@@ -137,7 +135,7 @@ export function CategoryAdmin() {
     const response = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, operatorName: OPERATOR })
+      body: JSON.stringify(body)
     });
     const data = await response.json().catch(() => ({}));
     setBusy("");

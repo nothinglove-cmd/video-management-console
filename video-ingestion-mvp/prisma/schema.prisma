@@ -81,6 +81,17 @@ enum ConfigStatus {
   DELETED
 }
 
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
 enum StorageProviderType {
   LOCAL
   NAS
@@ -161,6 +172,7 @@ model Workspace {
   derivativeFiles       DerivativeFile[]
   aiAnalysisJobs        AIAnalysisJob[]
   aiProviderConfigs     AIProviderConfig[]
+  userAccounts          UserAccount[]
 
   @@index([status])
   @@index([defaultStorageProviderId])
@@ -168,6 +180,38 @@ model Workspace {
   @@index([menuConfigId])
   @@index([terminologyPackId])
   @@index([industryTemplateId])
+}
+
+model UserAccount {
+  id                 String       @id @default(cuid())
+  workspaceId         String?
+  workspace           Workspace?   @relation(fields: [workspaceId], references: [id])
+  username           String       @unique
+  displayName        String
+  passwordHash       String
+  role               UserRole
+  status             UserStatus   @default(ACTIVE)
+  mustChangePassword Boolean      @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  sessions           UserSession[]
+
+  @@index([workspaceId])
+  @@index([role])
+  @@index([status])
+}
+
+model UserSession {
+  id        String      @id @default(cuid())
+  userId    String
+  user      UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String      @unique
+  expiresAt DateTime
+  createdAt DateTime    @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model AIProviderConfig {

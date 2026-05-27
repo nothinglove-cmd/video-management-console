@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import type { AssetType } from "@prisma/client";
 
-import { jsonError, readJson } from "@/app/api/_utils";
-import { normalizeOperatorName } from "@/lib/operator/operator-context";
+import { authOperatorName, jsonError, readJson, requireAdmin } from "@/app/api/_utils";
 import { prisma } from "@/lib/prisma";
 import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
@@ -16,14 +15,16 @@ type BatchBody = {
   ids?: string[];
   targetAssetType?: AssetType;
   targetCategory?: string;
-  operatorName?: string;
 };
 
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const body = await readJson<BatchBody>(request);
   const ids = body.ids ?? [];
   if (!body.action || ids.length === 0) return jsonError("请选择批量操作和素材。");
-  const operatorName = normalizeOperatorName(body.operatorName);
+  const operatorName = authOperatorName(auth.user);
 
   const materials = await prisma.material.findMany({
     where: { OR: [{ id: { in: ids } }, { materialId: { in: ids } }] }

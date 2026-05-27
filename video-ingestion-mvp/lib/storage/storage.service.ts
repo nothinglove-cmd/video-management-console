@@ -12,12 +12,12 @@ import {
   type SourceType
 } from "@prisma/client";
 
-import { prisma } from "@/lib/prisma";
-import { nullableByteSizeToSafeNumber } from "@/lib/serialization/bigint-json";
+import { prisma } from "../prisma";
+import { nullableByteSizeToSafeNumber } from "../serialization/bigint-json";
 import {
   getCachedResolvedStorageRoot,
   refreshResolvedStorageRoot
-} from "@/lib/storage/storage-root-config.service";
+} from "./storage-root-config.service";
 import {
   FAILED_DIR,
   PENDING_DIRS,
@@ -33,7 +33,7 @@ import {
   getSubCategoryLabelForDirectory,
   isBusinessCategoryForAsset,
   normalizeCategoryAlias
-} from "@/lib/storage/storage.constants";
+} from "./storage.constants";
 
 type JsonRecord = Record<string, unknown>;
 type MetadataDerivative = Pick<

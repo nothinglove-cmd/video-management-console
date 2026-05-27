@@ -107,7 +107,7 @@ export function CategoryDirectorySyncPanel() {
     const response = await fetch("/api/admin/categories/sync-directories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operatorName: "本地管理员" })
+      body: JSON.stringify({})
     });
     const data = await response.json().catch(() => ({}));
     setBusy("");

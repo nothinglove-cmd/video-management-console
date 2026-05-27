@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { requireAdmin } from "@/app/api/_utils";
+
 import { prisma } from "@/lib/prisma";
 import { ingestionQueueService } from "@/modules/ingestion/ingestion-queue.service";
 
@@ -7,6 +9,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, context: { params: Promise<{ batchId: string }> }) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const { batchId } = await context.params;
   const body = await request.json().catch(() => ({})) as { jobIds?: unknown };
   const jobIds = Array.isArray(body.jobIds)

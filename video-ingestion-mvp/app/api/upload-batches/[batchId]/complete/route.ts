@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { canUseUploadSourceType, requireApiUser, uploadSourceDeniedResponse } from "@/app/api/_utils";
+
 import { prisma } from "@/lib/prisma";
 import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import { ingestionQueueService } from "@/modules/ingestion/ingestion-queue.service";
@@ -7,7 +9,10 @@ import { ingestionQueueService } from "@/modules/ingestion/ingestion-queue.servi
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: { params: Promise<{ batchId: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ batchId: string }> }) {
+  const auth = await requireApiUser(request);
+  if ("response" in auth) return auth.response;
+
   const { batchId } = await context.params;
   const batch = await prisma.importBatch.findUnique({ where: { batchId } });
   if (!batch) {
@@ -16,6 +21,7 @@ export async function POST(_request: Request, context: { params: Promise<{ batch
   if (batch.status !== "UPLOADING") {
     return NextResponse.json({ error: "批次已结束接收，请刷新批次状态。" }, { status: 409 });
   }
+  if (!canUseUploadSourceType(auth.user, batch.sourceType)) return uploadSourceDeniedResponse();
 
   const receivedCount = await prisma.ingestionJob.count({ where: { batchId } });
   const updatedBatch = await prisma.importBatch.update({

@@ -203,7 +203,7 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
   }
 
   async function loadCategories() {
-    const response = await fetch("/api/admin/categories", { cache: "no-store" });
+    const response = await fetch("/api/categories", { cache: "no-store" });
     const data = (await response.json()) as { categories: CategoryDto[] };
     setCategories(data.categories || []);
   }

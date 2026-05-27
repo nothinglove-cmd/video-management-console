@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { requireSuperAdmin } from "@/app/api/_utils";
+
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultWorkspace } from "@/lib/workspace/default-workspace.service";
 
@@ -19,7 +21,10 @@ function pickConfigStatus<T extends {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireSuperAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const defaults = await ensureDefaultWorkspace();
   const workspace = await prisma.workspace.findUnique({
     where: { id: defaults.workspace.id },

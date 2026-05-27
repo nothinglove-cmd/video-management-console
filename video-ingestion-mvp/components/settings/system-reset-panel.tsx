@@ -39,7 +39,6 @@ type SystemResetPreview = {
 
 type SystemResetResult = {
   executedAt: string;
-  operatorName: string;
   sqliteBackupPath: string;
   storageRoot: string;
   storageRootSource: "db" | "env";
@@ -79,7 +78,6 @@ export function SystemResetPanel() {
   const [preview, setPreview] = useState<SystemResetPreview | null>(null);
   const [result, setResult] = useState<SystemResetResult | null>(null);
   const [confirmation, setConfirmation] = useState("");
-  const [operatorName, setOperatorName] = useState("本地管理员");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -117,10 +115,7 @@ export function SystemResetPanel() {
     const response = await fetch("/api/admin/system-reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        confirmation,
-        operatorName
-      })
+      body: JSON.stringify({ confirmation })
     });
     const data = await response.json().catch(() => ({}));
     setBusy(false);
@@ -207,14 +202,10 @@ export function SystemResetPanel() {
           </div>
         </Surface>
 
-        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.35fr)]">
+        <div className="grid gap-2">
           <label className="min-w-0 space-y-1">
             <span className={skin.typography.label}>确认短语</span>
             <Input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder={REQUIRED_CONFIRMATION} />
-          </label>
-          <label className="min-w-0 space-y-1">
-            <span className={skin.typography.label}>操作人</span>
-            <Input value={operatorName} onChange={(event) => setOperatorName(event.target.value)} placeholder="本地管理员" />
           </label>
         </div>
 

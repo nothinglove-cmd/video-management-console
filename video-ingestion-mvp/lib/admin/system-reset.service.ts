@@ -133,7 +133,7 @@ export async function executeSystemReset(input: ExecuteSystemResetInput) {
     executedAt: new Date().toISOString(),
     operatorName: typeof input.operatorName === "string" && input.operatorName.trim()
       ? input.operatorName.trim()
-      : "本地管理员",
+      : "系统",
     sqliteBackupPath,
     storageRoot: resolvedStorageRoot.rootPath,
     storageRootSource: resolvedStorageRoot.source,

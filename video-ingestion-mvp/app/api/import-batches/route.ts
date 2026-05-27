@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import type { ImportBatch, IngestionJob, Material } from "@prisma/client";
+
+import { isAdminUser, requireApiUser } from "@/app/api/_utils";
+import type { ImportBatch, IngestionJob, Material, SourceType } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { toJsonSafe } from "@/lib/serialization/bigint-json";
@@ -8,14 +10,23 @@ import { ingestionQueueService } from "@/modules/ingestion/ingestion-queue.servi
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const WEB_UPLOAD_SOURCE_TYPES: SourceType[] = ["WEB_MOBILE_UPLOAD", "WEB_DESKTOP_UPLOAD"];
+
 export async function GET(request: Request) {
+  const auth = await requireApiUser(request);
+  if ("response" in auth) return auth.response;
+
   ingestionQueueService.kick();
 
   const { searchParams } = new URL(request.url);
   const limitParam = Number(searchParams.get("limit") || "10");
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 10;
+  const batchWhere = isAdminUser(auth.user)
+    ? {}
+    : { sourceType: { in: WEB_UPLOAD_SOURCE_TYPES } };
 
   const batches = await prisma.importBatch.findMany({
+    where: batchWhere,
     orderBy: { createdAt: "desc" },
     take: limit
   });

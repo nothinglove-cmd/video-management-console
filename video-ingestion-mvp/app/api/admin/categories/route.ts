@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 
+import { authOperatorName, requireSuperAdmin } from "@/app/api/_utils";
+
 import { listCategories, toCategoryTree } from "@/lib/categories/category.service";
 import { createRealDirectory } from "@/lib/directories/directory.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireSuperAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const categories = await listCategories();
   const childrenByParent = categories.reduce<Record<string, typeof categories>>((acc, category) => {
     const key = category.parentId || "ROOT";
@@ -22,6 +27,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireSuperAdmin(request);
+  if ("response" in auth) return auth.response;
+
   try {
     const body = await request.json().catch(() => ({}));
     if (!body.name || !body.parentId) {
@@ -33,7 +41,7 @@ export async function POST(request: Request) {
       folderName: body.folderName ? String(body.folderName) : undefined,
       sortOrder: Number(body.sortOrder || 100),
       allowUpload: body.allowUpload !== false,
-      operatorName: body.operatorName,
+      operatorName: authOperatorName(auth.user),
       notes: body.notes || null
     });
     return NextResponse.json({ category });

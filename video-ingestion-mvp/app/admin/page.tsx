@@ -28,6 +28,8 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { Panel, Surface } from "@/components/ui/surface";
 import type { AppMenuIconKey } from "@/lib/app-config/default-menu";
 import { getRuntimeAppConfig } from "@/lib/app-config/runtime-config";
+import { requirePageRole } from "@/lib/auth/page-guards";
+import { menuAllowedRoles } from "@/lib/auth/permissions";
 import { getNetworkAccessInfo } from "@/lib/network/access-info";
 import { prisma } from "@/lib/prisma";
 import { storageService } from "@/lib/storage/storage.service";
@@ -51,11 +53,13 @@ const iconMap = {
 } satisfies Record<AppMenuIconKey, LucideIcon>;
 
 export default async function AdminDashboardPage() {
+  const user = await requirePageRole("ADMIN");
   await storageService.initializeStorage();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const accessInfo = getNetworkAccessInfo();
   const { menu } = getRuntimeAppConfig();
+  const dashboardShortcuts = menu.dashboardShortcuts.filter((item) => menuAllowedRoles(item.id).includes(user.role));
 
   const [
     todayUploads,
@@ -113,7 +117,7 @@ export default async function AdminDashboardPage() {
       <section className="mt-4" style={skin.vars}>
         <SectionTitle title="快捷入口" description="常用入库、整理和系统配置入口。" />
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-          {menu.dashboardShortcuts.map((item) => {
+          {dashboardShortcuts.map((item) => {
             const Icon = iconMap[item.iconKey];
             return (
               <Link key={item.href} href={item.href} className={cn(skin.card, "group block p-3 lg:p-4")}>

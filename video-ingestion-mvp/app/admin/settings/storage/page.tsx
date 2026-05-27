@@ -8,12 +8,14 @@ import { InfoCard, SectionPanel, SettingsBackLink } from "@/components/settings/
 import { StorageRootPanel } from "@/components/settings/storage-root-panel";
 import { WorkspaceStatusPanel } from "@/components/settings/workspace-status-panel";
 import { StatusPill } from "@/components/ui/status-pill";
+import { requirePageRole } from "@/lib/auth/page-guards";
 import { getNetworkAccessInfo } from "@/lib/network/access-info";
 import { getStorageRootStatus } from "@/lib/storage/storage-root-config.service";
 
 export const dynamic = "force-dynamic";
 
 export default async function StorageSettingsPage() {
+  await requirePageRole("SUPER_ADMIN");
   const storageRootStatus = await getStorageRootStatus();
   const accessInfo = getNetworkAccessInfo();
 

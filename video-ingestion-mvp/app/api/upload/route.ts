@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import { NextResponse } from "next/server";
+
+import { canUseUploadSourceType, requireApiUser, uploadSourceDeniedResponse } from "@/app/api/_utils";
 import type { SourceType } from "@prisma/client";
 
 import { MAX_UPLOAD_BYTES } from "@/lib/config";
@@ -31,6 +33,9 @@ function isManualAssetType(value: FormDataEntryValue | null): value is ManualAss
 }
 
 export async function POST(request: Request) {
+  const auth = await requireApiUser(request);
+  if ("response" in auth) return auth.response;
+
   const contentLength = readContentLength(request);
   if (contentLength > MAX_UPLOAD_BYTES + LEGACY_UPLOAD_OVERHEAD_LIMIT_BYTES) {
     return NextResponse.json({
@@ -45,6 +50,7 @@ export async function POST(request: Request) {
   const sourceType: SourceType = isSourceType(requestedSourceType)
     ? requestedSourceType
     : "WEB_DESKTOP_UPLOAD";
+  if (!canUseUploadSourceType(auth.user, sourceType)) return uploadSourceDeniedResponse();
   const uploaderName = String(form.get("uploaderName") || "").trim() || "阿阳";
   const shooterId = String(form.get("shooterId") || "").trim();
   const shooterName = String(form.get("shooterName") || "").trim() || uploaderName;

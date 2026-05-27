@@ -5,6 +5,8 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { NextResponse } from "next/server";
 
+import { canUseUploadSourceType, requireApiUser, uploadSourceDeniedResponse } from "@/app/api/_utils";
+
 import { MAX_UPLOAD_BYTES } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { byteSizeToBigInt, toJsonSafe } from "@/lib/serialization/bigint-json";
@@ -19,6 +21,9 @@ export const dynamic = "force-dynamic";
 const MULTIPART_OVERHEAD_LIMIT_BYTES = 16 * 1024 * 1024;
 
 export async function POST(request: Request, context: { params: Promise<{ batchId: string }> }) {
+  const auth = await requireApiUser(request);
+  if ("response" in auth) return auth.response;
+
   await storageService.initializeStorage();
   const { batchId } = await context.params;
   const batch = await prisma.importBatch.findUnique({ where: { batchId } });
@@ -43,6 +48,7 @@ export async function POST(request: Request, context: { params: Promise<{ batchI
   }
 
   const metadata = metadataFromForm(form);
+  if (!canUseUploadSourceType(auth.user, metadata.sourceType)) return uploadSourceDeniedResponse();
   if (metadata.sourceType !== batch.sourceType) {
     return NextResponse.json({ error: "文件来源类型与批次不一致，请重新创建批次。" }, { status: 400 });
   }

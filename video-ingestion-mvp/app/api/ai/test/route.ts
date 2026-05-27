@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { requireSuperAdmin } from "@/app/api/_utils";
+
 import { redactSensitiveText, sanitizeDiagnostics } from "@/lib/security/redaction";
 import { materialClassifierService } from "@/modules/ai/material-classifier.service";
 
@@ -7,6 +9,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const auth = await requireSuperAdmin(request);
+  if ("response" in auth) return auth.response;
+
   try {
     const body = (await request.json().catch(() => ({}))) as { configId?: unknown };
     const configId = typeof body.configId === "string" ? body.configId : undefined;

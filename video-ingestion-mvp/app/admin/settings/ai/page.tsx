@@ -6,10 +6,12 @@ import { AiProviderConfigPanel } from "@/components/settings/ai-provider-config-
 import { InfoCard, SectionPanel, SettingsBackLink } from "@/components/settings/settings-page-parts";
 import { StatusPill } from "@/components/ui/status-pill";
 import { aiProviderConfigService } from "@/lib/ai/ai-provider-config.service";
+import { requirePageRole } from "@/lib/auth/page-guards";
 
 export const dynamic = "force-dynamic";
 
 export default async function AiSettingsPage() {
+  await requirePageRole("SUPER_ADMIN");
   const ai = await aiProviderConfigService.getPublicResolvedConfig();
 
   return (

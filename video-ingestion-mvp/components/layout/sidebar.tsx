@@ -10,6 +10,7 @@ import {
   FolderKanban,
   FolderTree,
   Home,
+  LogOut,
   MonitorUp,
   Recycle,
   Settings,
@@ -18,11 +19,19 @@ import {
   Users
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import type { UserRole } from "@prisma/client";
 
 import { skin } from "@/components/theme/skin";
 import { getRuntimeAppConfig } from "@/lib/app-config/runtime-config";
 import type { AppMenuIconKey } from "@/lib/app-config/default-menu";
+import { menuAllowedRoles } from "@/lib/auth/permissions";
 import { cn } from "@/lib/utils";
+
+type SidebarUser = {
+  username: string;
+  displayName: string;
+  role: UserRole;
+};
 
 const iconMap = {
   archive: Archive,
@@ -40,16 +49,26 @@ const iconMap = {
 export function Sidebar({
   mobileOpen = false,
   collapsed = false,
+  user,
+  onLogout,
   onToggleCollapsed,
   onNavigate
 }: {
   mobileOpen?: boolean;
   collapsed?: boolean;
+  user: SidebarUser | null;
+  onLogout: () => void;
   onToggleCollapsed?: () => void;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   const { menu, theme } = getRuntimeAppConfig();
+  const items = user
+    ? menu.sidebarItems.filter((item) => menuAllowedRoles(item.id).includes(user.role))
+    : [];
+  const displayName = user?.displayName || user?.username || "未登录";
+  const roleLabel = user ? ROLE_LABELS[user.role] : "访客";
+  const avatarText = displayName.slice(0, 1) || "用";
 
   return (
     <aside
@@ -83,7 +102,7 @@ export function Sidebar({
       </div>
 
       <nav className={cn("flex-1 space-y-1 px-3 py-4", collapsed && "px-2")}>
-        {menu.sidebarItems.map((item) => {
+        {items.map((item) => {
           const Icon = iconMap[item.iconKey];
           const active =
             pathname === item.href ||
@@ -114,13 +133,30 @@ export function Sidebar({
 
       <div className={cn("border-t border-white/10 p-4", collapsed && "p-2")}>
         <div className={cn(skin.sidebar.userPanel, collapsed && "flex h-10 w-10 items-center justify-center p-0")}>
-          {collapsed ? <span className="text-sm font-semibold">管</span> : null}
-          <div className={cn(collapsed && "hidden")}>
-            <p className="text-sm font-semibold">本地管理员</p>
-            <p className={cn("mt-0.5 text-xs", skin.sidebar.mutedText)}>当前操作员</p>
+          {collapsed ? <span className="text-sm font-semibold">{avatarText}</span> : null}
+          <div className={cn("min-w-0 flex-1", collapsed && "hidden")}>
+            <p className="truncate text-sm font-semibold">{displayName}</p>
+            <p className={cn("mt-0.5 text-xs", skin.sidebar.mutedText)}>{roleLabel}</p>
           </div>
+          {!collapsed ? (
+            <button
+              type="button"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--skin-radius-control)] text-white/70 hover:bg-white/10 hover:text-white"
+              onClick={onLogout}
+              aria-label="退出登录"
+              title="退出登录"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
       </div>
     </aside>
   );
 }
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  SUPER_ADMIN: "超级管理员",
+  ADMIN: "管理员",
+  USER: "普通用户"
+};

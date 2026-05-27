@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { canUseUploadSourceType, requireApiUser, uploadSourceDeniedResponse } from "@/app/api/_utils";
+
 import { prisma } from "@/lib/prisma";
 import { byteSizeToBigInt, toJsonSafe } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
@@ -11,9 +13,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const auth = await requireApiUser(request);
+  if ("response" in auth) return auth.response;
+
   await storageService.initializeStorage();
   const body = await request.json().catch(() => ({}));
   const metadata = metadataFromJson(body);
+  if (!canUseUploadSourceType(auth.user, metadata.sourceType)) return uploadSourceDeniedResponse();
   const fileCount = readNonNegativeInteger(body, "fileCount");
   const totalSize = readNonNegativeInteger(body, "totalSize");
 

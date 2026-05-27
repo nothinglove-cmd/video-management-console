@@ -76,6 +76,13 @@ export const DEFAULT_MENU_ITEMS: readonly AppMenuItem[] = [
     placements: ["sidebar"]
   },
   {
+    id: "users",
+    href: "/admin/users",
+    label: "用户管理",
+    iconKey: "users",
+    placements: ["sidebar"]
+  },
+  {
     id: "trash",
     href: "/admin/trash",
     label: "回收站",

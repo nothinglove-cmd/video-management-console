@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 
-import { jsonError, readJson } from "@/app/api/_utils";
+import { authOperatorName, jsonError, readJson, requireAdmin } from "@/app/api/_utils";
 import { storageService } from "@/lib/storage/storage.service";
 import { ingestionPipeline } from "@/modules/ingestion/ingestion.pipeline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   try {
     const folders = await ingestionPipeline.scanReadyDeviceImports();
     return NextResponse.json({
@@ -20,6 +23,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   try {
     const body = await readJson<{
       folderName?: string;
@@ -29,7 +35,7 @@ export async function POST(request: Request) {
     if (!body.folderName) return jsonError("请选择包含 _READY.txt 的设备拷贝文件夹。");
     const result = await ingestionPipeline.importDeviceFolder({
       folderName: body.folderName,
-      uploaderName: body.uploaderName || "设备导入",
+      uploaderName: body.uploaderName || authOperatorName(auth.user),
       notes: body.notes
     });
     return NextResponse.json(result);

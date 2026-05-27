@@ -768,7 +768,7 @@ export class IngestionPipeline {
     return updated;
   }
 
-  async applyLatestSuggestion(material: Material, operatorName = "本地管理员") {
+  async applyLatestSuggestion(material: Material, operatorName = "系统") {
     const aiResult = material.aiResult as Prisma.JsonObject | null;
     const latestSuggestion = aiResult?.latestSuggestion ?? aiResult?.appliedSuggestion ?? aiResult;
     const suggestion = AiClassificationSchema.safeParse(latestSuggestion);
@@ -896,7 +896,7 @@ export class IngestionPipeline {
     operatorName?: string;
   }) {
     if (params.action === "USE_AI_SUGGESTION") {
-      return this.applyLatestSuggestion(params.material, params.operatorName || "本地管理员");
+      return this.applyLatestSuggestion(params.material, params.operatorName || "系统");
     }
 
     const userSelectedCategory =

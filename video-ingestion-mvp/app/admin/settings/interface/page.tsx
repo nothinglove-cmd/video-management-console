@@ -8,11 +8,13 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { Surface } from "@/components/ui/surface";
 import { skin } from "@/components/theme/skin";
 import { getRuntimeAppConfig } from "@/lib/app-config/runtime-config";
+import { requirePageRole } from "@/lib/auth/page-guards";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default function InterfaceSettingsPage() {
+export default async function InterfaceSettingsPage() {
+  await requirePageRole("SUPER_ADMIN");
   const config = getRuntimeAppConfig();
   const activeSkin = config.themeSkins.options.find((option) => option.code === config.themeSkins.activeCode);
 
@@ -52,7 +54,7 @@ export default function InterfaceSettingsPage() {
                 <p className={skin.typography.sectionTitle}>上层中台预留</p>
                 <p className={cn("mt-1", skin.typography.meta)}>第一版只保留字段边界</p>
               </div>
-              <p>预留 operatorId / tenantId / workspaceId / projectId / accountId / productId；当前“本地管理员”只用于操作日志。</p>
+              <p>预留 operatorId / tenantId / workspaceId / projectId / accountId / productId；操作日志会优先使用当前登录账号。</p>
             </Surface>
           </div>
         </SectionPanel>

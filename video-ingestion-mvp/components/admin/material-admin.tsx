@@ -149,7 +149,7 @@ export function MaterialAdmin({
   }
 
   async function loadCategories() {
-    const response = await fetch("/api/admin/categories", { cache: "no-store" });
+    const response = await fetch("/api/categories", { cache: "no-store" });
     const data = await response.json().catch(() => null) as { categories?: CategoryNodeDto[]; error?: string } | null;
     if (!response.ok || !data) throw new Error(data?.error || "栏目配置加载失败。");
     setCategoryNodes(data.categories || []);
@@ -257,7 +257,7 @@ export function MaterialAdmin({
       setMessage("请先选择素材。");
       return;
     }
-    let body: Record<string, unknown> = { action, ids: selectedIds, operatorName: "本地管理员" };
+    let body: Record<string, unknown> = { action, ids: selectedIds };
     if (action === "move") {
       const first = payload.materials.find((item) => item.id === selectedIds[0]);
       if (first) setDialog({ type: "batchMove", material: first });
@@ -266,7 +266,7 @@ export function MaterialAdmin({
     if (action === "restore") {
       for (const id of selectedIds) {
         const material = payload.materials.find((item) => item.id === id);
-        if (material) await post(`/api/materials/${material.id}/restore`, { operatorName: "本地管理员" });
+        if (material) await post(`/api/materials/${material.id}/restore`);
       }
       setSelectedIds([]);
       return;
@@ -283,9 +283,9 @@ export function MaterialAdmin({
         editTags,
         trash: trashMaterial,
         reanalyze: (material) => post(`/api/materials/${material.id}/reanalyze`),
-        applyAiSuggestion: (material) => post(`/api/materials/${material.id}/apply-ai-suggestion`, { operatorName: "本地管理员" }),
-        confirm: (material) => post(`/api/materials/${material.id}/confirm`, { operatorName: "本地管理员" }),
-        useUserSelection: (material) => post(`/api/materials/${material.id}/resolve-conflict`, { action: "USE_USER_SELECTION", operatorName: "本地管理员" }),
+        applyAiSuggestion: (material) => post(`/api/materials/${material.id}/apply-ai-suggestion`),
+        confirm: (material) => post(`/api/materials/${material.id}/confirm`),
+        useUserSelection: (material) => post(`/api/materials/${material.id}/resolve-conflict`, { action: "USE_USER_SELECTION" }),
         resolveConflictManually,
         addToPackage: () => setMessage("加入精选包是占位功能，后续阶段实现。")
       };
@@ -630,7 +630,7 @@ export function MaterialAdmin({
           material={current.material}
           onClose={closeDialog}
           onSubmit={async (fileName) => {
-            await post(`/api/materials/${current.material.id}/rename`, { fileName, operatorName: "本地管理员" });
+            await post(`/api/materials/${current.material.id}/rename`, { fileName });
             closeDialog();
           }}
         />
@@ -646,8 +646,7 @@ export function MaterialAdmin({
             await post(`/api/materials/${current.material.id}/move`, {
               categoryId: category?.id,
               assetType: rootCategory,
-              category: directory,
-              operatorName: "本地管理员"
+              category: directory
             });
             closeDialog();
           }}
@@ -666,8 +665,7 @@ export function MaterialAdmin({
               action: "move",
               ids: selectedIds,
               targetAssetType: rootCategory,
-              targetCategory: directory,
-              operatorName: "本地管理员"
+              targetCategory: directory
             });
             setSelectedIds([]);
             closeDialog();
@@ -690,8 +688,7 @@ export function MaterialAdmin({
               action: "MANUAL_DIRECTORY",
               categoryId: category?.id,
               rootCategory,
-              subCategory,
-              operatorName: "本地管理员"
+              subCategory
             });
             closeDialog();
           }}
@@ -706,8 +703,7 @@ export function MaterialAdmin({
           onSubmit={async (payload) => {
             await post(`/api/materials/${current.material.id}/tags`, {
               ...payload,
-              humanConfirmed: true,
-              operatorName: "本地管理员"
+              humanConfirmed: true
             });
             closeDialog();
           }}
@@ -724,7 +720,7 @@ export function MaterialAdmin({
           tone="danger"
           onClose={closeDialog}
           onConfirm={async () => {
-            await post(`/api/materials/${current.material.id}/trash`, { operatorName: "本地管理员" });
+            await post(`/api/materials/${current.material.id}/trash`);
             closeDialog();
           }}
         />
@@ -737,7 +733,7 @@ export function MaterialAdmin({
         submitLabel="恢复到此目录"
         onClose={closeDialog}
         onSubmit={async (_rootCategory, _subCategory, directory) => {
-          await post(`/api/materials/${current.material.id}/restore`, { targetCategory: directory, operatorName: "本地管理员" });
+          await post(`/api/materials/${current.material.id}/restore`, { targetCategory: directory });
           closeDialog();
         }}
       />

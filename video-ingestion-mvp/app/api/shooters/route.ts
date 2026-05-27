@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
-import { jsonError, readJson } from "@/app/api/_utils";
+import { jsonError, readJson, requireAdmin, requireApiUser } from "@/app/api/_utils";
 import { createShooter, listShooters } from "@/lib/shooters/shooter.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const auth = await requireApiUser(request);
+  if ("response" in auth) return auth.response;
+
   const url = new URL(request.url);
   const activeOnly = url.searchParams.get("active") === "1";
   const shooters = await listShooters({ activeOnly });
@@ -15,6 +18,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const body = await readJson<{ name?: string; displayName?: string; notes?: string }>(request);
   try {
     const shooter = await createShooter({

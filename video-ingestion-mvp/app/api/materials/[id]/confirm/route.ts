@@ -1,19 +1,20 @@
 import { NextResponse } from "next/server";
 
-import { getRouteId, readJson, requireMaterial } from "@/app/api/_utils";
-import { normalizeOperatorName } from "@/lib/operator/operator-context";
+import { authOperatorName, getRouteId, requireMaterial, requireAdmin } from "@/app/api/_utils";
 import { toJsonSafe } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const auth = await requireAdmin(request);
+  if ("response" in auth) return auth.response;
+
   const id = await getRouteId(context);
-  const body = await readJson<{ operatorName?: string }>(request);
   const material = await requireMaterial(id);
   const updated = await storageService.confirmMaterial({
     material,
-    operatorName: normalizeOperatorName(body.operatorName)
+    operatorName: authOperatorName(auth.user)
   });
   return NextResponse.json(toJsonSafe({ material: updated }));
 }

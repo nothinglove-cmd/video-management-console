@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { Prisma } from "@prisma/client";
 
-import { getStorageRoot } from "@/lib/config";
-import { prisma } from "@/lib/prisma";
+import { getStorageRoot } from "../config";
+import { prisma } from "../prisma";
 
 const DEFAULT_WORKSPACE_CODE = "default";
 const DEFAULT_STORAGE_PROVIDER_CODE = "local-default";

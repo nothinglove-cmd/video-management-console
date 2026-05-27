@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+
+import { isAdminUser, requireApiUser } from "@/app/api/_utils";
 import type { ImportBatch, IngestionJob, Material } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -49,13 +51,19 @@ function batchStatusText(
   return "后台入库处理中";
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ batchId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ batchId: string }> }) {
+  const auth = await requireApiUser(request);
+  if ("response" in auth) return auth.response;
+
   const { batchId } = await context.params;
   ingestionQueueService.kick();
 
   const batch = await prisma.importBatch.findUnique({ where: { batchId } });
   if (!batch) {
     return NextResponse.json({ error: "批次不存在。" }, { status: 404 });
+  }
+  if (!isAdminUser(auth.user) && !["WEB_MOBILE_UPLOAD", "WEB_DESKTOP_UPLOAD"].includes(batch.sourceType)) {
+    return NextResponse.json({ error: "当前账号不能查看该导入批次。" }, { status: 403 });
   }
 
   const [jobs, materials] = await Promise.all([

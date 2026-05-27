@@ -8,6 +8,7 @@ import { MetricCard } from "@/components/ui/metric-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { aiProviderConfigService } from "@/lib/ai/ai-provider-config.service";
 import { getEnvironmentStatus } from "@/lib/admin/environment-status.service";
+import { requirePageRole } from "@/lib/auth/page-guards";
 import { getNetworkAccessInfo } from "@/lib/network/access-info";
 import { prisma } from "@/lib/prisma";
 import { getStorageRootStatus } from "@/lib/storage/storage-root-config.service";
@@ -15,6 +16,7 @@ import { getStorageRootStatus } from "@/lib/storage/storage-root-config.service"
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  await requirePageRole("SUPER_ADMIN");
   const ai = await aiProviderConfigService.getPublicResolvedConfig();
   const environmentStatus = await getEnvironmentStatus();
   const accessInfo = getNetworkAccessInfo();
