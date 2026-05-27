@@ -49,5 +49,3 @@ export function getAiConfig() {
 }
 
 export type AiConfig = ReturnType<typeof getAiConfig>;
-
-export const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;

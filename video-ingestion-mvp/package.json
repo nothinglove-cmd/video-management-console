@@ -22,6 +22,7 @@
   "dependencies": {
     "@prisma/client": "^6.9.0",
     "@radix-ui/react-slot": "^1.2.3",
+    "busboy": "^1.6.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
@@ -33,6 +34,7 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@types/busboy": "^1.5.4",
     "@types/node": "^22.15.30",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

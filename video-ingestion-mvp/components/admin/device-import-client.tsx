@@ -193,7 +193,7 @@ export function DeviceImportClient() {
               {deviceImportPath || "正在读取目录..."}
             </div>
             <p className={cn("text-muted-foreground", skin.typography.meta)}>
-              10GB+ 原片、50GB+ 直播录屏、NAS 或移动硬盘素材放到这里后再创建 _READY.txt。网页上传保留给小文件和中等文件。
+              10GB+ 原片、50GB+ 直播录屏、NAS 或移动硬盘素材可以浏览器上传；批量或长时间任务放到这里后再创建 _READY.txt 会更稳定。
             </p>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={copyPath} disabled={!deviceImportPath}>

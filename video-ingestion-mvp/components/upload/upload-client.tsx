@@ -93,6 +93,7 @@ type ShooterDto = {
 };
 
 const { terminology: terms } = getRuntimeAppConfig();
+const LARGE_BROWSER_UPLOAD_BYTES = 10 * 1024 ** 3;
 
 type CategoryDto = {
   id: string;
@@ -422,8 +423,8 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
     if (!file || !item || item.status === "uploaded" || item.status === "canceled") return Promise.resolve();
 
     const formData = new FormData();
-    formData.append("file", file);
     appendUploadMetadata(formData, metadata);
+    formData.append("file", file);
 
     updateUploadItem(itemKey, { status: "uploading", progress: 0, error: undefined });
 
@@ -456,7 +457,7 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
       };
       xhr.onerror = () => {
         xhrsRef.current.delete(itemKey);
-        updateUploadItem(itemKey, { status: "failed", progress: 0, error: "网络中断，文件上传失败。" });
+        updateUploadItem(itemKey, { status: "failed", progress: 0, error: browserUploadFailureMessage(file) });
         resolve();
       };
       xhr.onabort = () => {
@@ -677,6 +678,11 @@ export function UploadClient({ mode, sourceType }: UploadClientProps) {
             已选择 {fileQueue.count} 个文件，共 {formatBytes(fileQueue.totalSize)}。
           </p>
         ) : null}
+        {fileQueue.items.some((item) => item.size >= LARGE_BROWSER_UPLOAD_BYTES) ? (
+          <p className={cn("mt-2 max-w-2xl text-amber-700", skin.typography.meta)}>
+            已选择 10GB+ 大文件，浏览器会继续尝试上传。请保持页面打开、网络稳定，并确认存储目录剩余空间充足；失败后可查看单文件原因并重试。
+          </p>
+        ) : null}
         <Button className={cn("mt-4 max-w-md", skin.responsive.uploadPrimaryAction)} size="lg" disabled={isUploading || fileQueue.count === 0} onClick={upload}>
           {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-4 w-4" />}
           {isUploading ? `正在${terms.upload.noun}...` : `${terms.upload.noun}到待${terms.ingestion.noun}队列`}
@@ -811,6 +817,11 @@ function parseJson(text: string) {
   } catch {
     return null;
   }
+}
+
+function browserUploadFailureMessage(file: File) {
+  const sizeText = formatBytes(file.size);
+  return `浏览器上传失败：${file.name}（${sizeText}）未成功传到服务器。请确认页面未关闭、网络未中断、存储目录空间充足，或服务端/反向代理没有中途断开连接后重试。`;
 }
 
 function mergeUploadedJobResult(current: UploadResult | null, batchId: string, job: UploadJobDto): UploadResult {

@@ -4,7 +4,6 @@ import { NextResponse } from "next/server";
 import { canUseUploadSourceType, requireApiUser, uploadSourceDeniedResponse } from "@/app/api/_utils";
 import type { SourceType } from "@prisma/client";
 
-import { MAX_UPLOAD_BYTES } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { byteSizeToBigInt, byteSizeToSafeNumber, toJsonSafe } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
@@ -15,8 +14,6 @@ import { normalizeCustomTags } from "@/modules/ingestion/ingest-taxonomy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const LEGACY_UPLOAD_OVERHEAD_LIMIT_BYTES = 16 * 1024 * 1024;
 
 function isSourceType(value: FormDataEntryValue | null): value is SourceType {
   return (
@@ -35,13 +32,6 @@ function isManualAssetType(value: FormDataEntryValue | null): value is ManualAss
 export async function POST(request: Request) {
   const auth = await requireApiUser(request);
   if ("response" in auth) return auth.response;
-
-  const contentLength = readContentLength(request);
-  if (contentLength > MAX_UPLOAD_BYTES + LEGACY_UPLOAD_OVERHEAD_LIMIT_BYTES) {
-    return NextResponse.json({
-      error: "旧版批量上传接口单次请求超过 1GB 上限。请使用页面逐文件上传；10GB+/50GB+ 原片请使用本地/NAS/设备目录导入。"
-    }, { status: 413 });
-  }
 
   await storageService.initializeStorage();
   const form = await request.formData();
@@ -66,11 +56,6 @@ export async function POST(request: Request) {
 
   if (files.length === 0) {
     return NextResponse.json({ error: "请选择至少一个视频或图片文件。" }, { status: 400 });
-  }
-
-  const oversized = files.find((file) => file.size > MAX_UPLOAD_BYTES);
-  if (oversized) {
-    return NextResponse.json({ error: `${oversized.name} 超过单文件 1GB 的本地测试限制。` }, { status: 413 });
   }
 
   const selectedCategory = categoryId
@@ -173,9 +158,4 @@ export async function POST(request: Request) {
     materials: [],
     errors
   }));
-}
-
-function readContentLength(request: Request) {
-  const contentLength = Number(request.headers.get("content-length") || 0);
-  return Number.isFinite(contentLength) && contentLength > 0 ? contentLength : 0;
 }

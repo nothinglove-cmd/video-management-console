@@ -1,6 +1,5 @@
 import type { SourceType } from "@prisma/client";
 
-import { MAX_UPLOAD_BYTES } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { byteSizeToSafeNumber } from "@/lib/serialization/bigint-json";
 import type { ManualAssetType } from "@/modules/ingestion/ingestion.pipeline";
@@ -97,9 +96,6 @@ export async function validateUploadCategory(categoryId: string) {
 
 export function validateUploadFile(file: File | null | undefined) {
   if (!file) return { error: "请选择要上传的文件。", status: 400 as const };
-  if (file.size > MAX_UPLOAD_BYTES) {
-    return { error: `${file.name} 超过单文件 1GB 的本地测试限制。`, status: 413 as const };
-  }
   return { file };
 }
 

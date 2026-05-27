@@ -10,7 +10,7 @@ export default async function DeviceImportPage() {
       <PageHeader
         eyebrow="Large File Import"
         title="大文件 / 直播录屏导入"
-        description="10GB+ 原片、50GB+ 直播录屏和 NAS 素材优先走本地目录导入，避免浏览器长时间上传。"
+        description="10GB+ 原片、50GB+ 直播录屏和 NAS 素材可用浏览器上传；本地目录导入适合批量和长时间任务，更稳定。"
       />
       <DeviceImportClient />
     </AppShell>
