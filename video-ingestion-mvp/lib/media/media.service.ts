@@ -5,6 +5,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 
+import { resolveMediaBinary } from "@/lib/media/ffmpeg-binaries";
+
 const execFileAsync = promisify(execFile);
 const FFMPEG_VERSION_TIMEOUT_MS = 5000;
 const FFPROBE_TIMEOUT_MS = 45000;
@@ -70,9 +72,9 @@ type FfprobeResult = {
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"]);
 
-async function binaryAvailable(binaryName: string) {
+async function binaryAvailable(binaryName: "ffmpeg" | "ffprobe") {
   try {
-    await execFileAsync(binaryName, ["-version"], { timeout: FFMPEG_VERSION_TIMEOUT_MS });
+    await execFileAsync(resolveMediaBinary(binaryName), ["-version"], { timeout: FFMPEG_VERSION_TIMEOUT_MS });
     return true;
   } catch {
     return false;
@@ -158,7 +160,7 @@ export class MediaService {
 
     try {
       const { stdout } = await execFileAsync(
-        "ffprobe",
+        resolveMediaBinary("ffprobe"),
         [
           "-v",
           "error",
@@ -318,7 +320,7 @@ export class MediaService {
           ];
 
       try {
-        await execFileAsync("ffmpeg", args, { timeout: FRAME_TIMEOUT_MS });
+        await execFileAsync(resolveMediaBinary("ffmpeg"), args, { timeout: FRAME_TIMEOUT_MS });
         frames.push(outputPath);
       } catch (error) {
         warnings.push(`关键帧 ${index + 1} 抽取失败：${(error as Error).message}`);
@@ -375,7 +377,7 @@ export class MediaService {
         ];
 
     try {
-      await execFileAsync("ffmpeg", args, { timeout: THUMBNAIL_TIMEOUT_MS });
+      await execFileAsync(resolveMediaBinary("ffmpeg"), args, { timeout: THUMBNAIL_TIMEOUT_MS });
       return { thumbnailPath: params.outputPath, warnings };
     } catch (error) {
       warnings.push(`缩略图生成失败，但入库流程会继续：${(error as Error).message}`);
@@ -442,7 +444,7 @@ export class MediaService {
     ];
 
     try {
-      await execFileAsync("ffmpeg", args, { timeout: PREVIEW_TIMEOUT_MS });
+      await execFileAsync(resolveMediaBinary("ffmpeg"), args, { timeout: PREVIEW_TIMEOUT_MS });
       return { previewPath: params.outputPath, warnings };
     } catch (error) {
       warnings.push(`preview MP4 生成失败，但入库流程会继续：${(error as Error).message}`);

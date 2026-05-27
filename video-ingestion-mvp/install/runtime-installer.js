@@ -44,13 +44,6 @@ async function main() {
   await removeFreshDatabaseFiles();
 
   await runStep("安装项目依赖", npmCommand(), ["ci"]);
-  await runStep("安装项目专用 FFmpeg", npmCommand(), [
-    "install",
-    "--no-save",
-    "--package-lock=false",
-    "ffmpeg-static",
-    "ffprobe-static"
-  ]);
   await createFfmpegShims();
   await runStep("初始化数据库", npmCommand(), ["run", "db:push"]);
   await runStep("初始化默认工作区", npmCommand(), ["run", "init:workspace"]);
@@ -305,14 +298,14 @@ async function createFfmpegShims() {
   } else {
     const ffmpegShim = path.join(runtimeBin, "ffmpeg");
     const ffprobeShim = path.join(runtimeBin, "ffprobe");
-    await fsp.writeFile(ffmpegShim, shellShim(ffmpegPath), "utf8");
-    await fsp.writeFile(ffprobeShim, shellShim(ffprobePath), "utf8");
+    await fsp.copyFile(ffmpegPath, ffmpegShim);
+    await fsp.copyFile(ffprobePath, ffprobeShim);
     await fsp.chmod(ffmpegShim, 0o755);
     await fsp.chmod(ffprobeShim, 0o755);
   }
 
-  await runStep("验证 FFmpeg", "ffmpeg", ["-version"]);
-  await runStep("验证 ffprobe", "ffprobe", ["-version"]);
+  await runStep("验证 FFmpeg", path.join(runtimeBin, isWindows ? "ffmpeg.exe" : "ffmpeg"), ["-version"]);
+  await runStep("验证 ffprobe", path.join(runtimeBin, isWindows ? "ffprobe.exe" : "ffprobe"), ["-version"]);
 }
 
 function resolveFfmpegPath() {
@@ -340,14 +333,6 @@ function windowsShim(binaryPath) {
     `"${binaryPath}" %*`,
     ""
   ].join("\r\n");
-}
-
-function shellShim(binaryPath) {
-  return [
-    "#!/bin/sh",
-    `exec "${binaryPath.replace(/"/g, '\\"')}" "$@"`,
-    ""
-  ].join("\n");
 }
 
 async function runStep(label, command, args) {

@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { resolveMediaBinary } from "@/lib/media/ffmpeg-binaries";
+
 const execFileAsync = promisify(execFile);
 
 export type BinaryStatus = {
@@ -30,9 +32,9 @@ export async function getEnvironmentStatus(): Promise<EnvironmentStatus> {
   };
 }
 
-async function checkBinaryVersion(binaryName: string): Promise<BinaryStatus> {
+async function checkBinaryVersion(binaryName: "ffmpeg" | "ffprobe"): Promise<BinaryStatus> {
   try {
-    const result = await execFileAsync(binaryName, ["-version"], { timeout: 5000 });
+    const result = await execFileAsync(resolveMediaBinary(binaryName), ["-version"], { timeout: 5000 });
     const versionLine = firstLine(result.stdout) || `${binaryName} available`;
     return {
       available: true,

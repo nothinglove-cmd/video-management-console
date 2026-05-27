@@ -240,9 +240,10 @@ VIDEO_INSTALL_SELF_TEST=1 .runtime/node/bin/node install/runtime-installer.js
 
 ## FFmpeg
 
-安装器会自动准备项目专用 FFmpeg / ffprobe。手动部署时需要系统里有：
+安装器和 `npm install` 会准备项目专用 FFmpeg / ffprobe，不要求安装到系统全局。手动部署后可以用下面命令检查：
 
 ```bash
-ffmpeg -version
-ffprobe -version
+.runtime/bin/ffmpeg -version
+.runtime/bin/ffprobe -version
+.runtime/node/bin/npm run check:env
 ```

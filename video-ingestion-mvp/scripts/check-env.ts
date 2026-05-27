@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
+import syncFs from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -114,11 +115,52 @@ function resolveDatabasePath(databaseUrl: string) {
 }
 
 async function checkBinary(binaryName: string) {
+  const command = resolveMediaBinary(binaryName);
   try {
-    await execFileAsync(binaryName, ["-version"], { timeout: 5000 });
-    add("pass", binaryName, `${binaryName} is available.`);
+    await execFileAsync(command, ["-version"], { timeout: 5000 });
+    add("pass", binaryName, `${binaryName} is available at ${command}.`);
   } catch {
-    add("warn", binaryName, `${binaryName} is not available in PATH.`);
+    add("warn", binaryName, `${binaryName} is not available in PATH or project runtime.`);
+  }
+}
+
+function resolveMediaBinary(binaryName: string) {
+  const envPath = binaryName === "ffmpeg" ? process.env.FFMPEG_PATH : binaryName === "ffprobe" ? process.env.FFPROBE_PATH : "";
+  const executable = process.platform === "win32" ? `${binaryName}.exe` : binaryName;
+  const candidates = [
+    envPath,
+    path.join(projectRoot, ".runtime", "bin", executable),
+    resolveStaticPackageBinary(binaryName),
+    binaryName
+  ].filter((value): value is string => Boolean(value));
+  return candidates.find((candidate) => candidate === binaryName || isExecutableFile(candidate)) || binaryName;
+}
+
+function resolveStaticPackageBinary(binaryName: string) {
+  try {
+    if (binaryName === "ffmpeg") {
+      const resolved = require.resolve("ffmpeg-static", { paths: [projectRoot] });
+      const value = require(resolved);
+      return typeof value === "string" ? value : "";
+    }
+    if (binaryName === "ffprobe") {
+      const resolved = require.resolve("ffprobe-static", { paths: [projectRoot] });
+      const value = require(resolved);
+      if (typeof value === "string") return value;
+      return value && typeof value.path === "string" ? value.path : "";
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function isExecutableFile(filePath: string) {
+  try {
+    syncFs.accessSync(filePath, syncFs.constants.X_OK);
+    return syncFs.statSync(filePath).isFile();
+  } catch {
+    return false;
   }
 }
 
