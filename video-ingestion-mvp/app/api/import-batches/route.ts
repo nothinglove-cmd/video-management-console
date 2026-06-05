@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { isAdminUser, requireApiUser } from "@/app/api/_utils";
-import type { ImportBatch, IngestionJob, Material, SourceType } from "@prisma/client";
+import type { BatchStatus, ImportBatch, IngestionJob, Material, Prisma, SourceType } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { toJsonSafe } from "@/lib/serialization/bigint-json";
@@ -11,6 +11,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const WEB_UPLOAD_SOURCE_TYPES: SourceType[] = ["WEB_MOBILE_UPLOAD", "WEB_DESKTOP_UPLOAD"];
+const BATCH_STATUSES: BatchStatus[] = ["UPLOADING", "PROCESSING", "NEEDS_REVIEW", "IMPORTED", "PARTIAL_FAILED", "FAILED"];
+const SOURCE_TYPES: SourceType[] = ["WEB_MOBILE_UPLOAD", "WEB_DESKTOP_UPLOAD", "DEVICE_IMPORT", "MANUAL_IMPORT"];
 
 export async function GET(request: Request) {
   const auth = await requireApiUser(request);
@@ -20,10 +22,26 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const limitParam = Number(searchParams.get("limit") || "10");
-  const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 10;
-  const batchWhere = isAdminUser(auth.user)
+  const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 200) : 10;
+  const adminUser = isAdminUser(auth.user);
+  const batchWhere: Prisma.ImportBatchWhereInput = adminUser
     ? {}
     : { sourceType: { in: WEB_UPLOAD_SOURCE_TYPES } };
+  const status = parseBatchStatus(searchParams.get("status"));
+  const sourceType = parseSourceType(searchParams.get("sourceType"));
+  const q = searchParams.get("q")?.trim();
+
+  if (status) batchWhere.status = status;
+  if (sourceType && (adminUser || WEB_UPLOAD_SOURCE_TYPES.includes(sourceType))) {
+    batchWhere.sourceType = sourceType;
+  }
+  if (q) {
+    batchWhere.OR = [
+      { batchId: { contains: q } },
+      { uploaderName: { contains: q } },
+      { notes: { contains: q } }
+    ];
+  }
 
   const batches = await prisma.importBatch.findMany({
     where: batchWhere,
@@ -93,4 +111,14 @@ function batchStatusText(
   if (status === "IMPORTED") return "批次已完成入库";
   if (status === "UPLOADING") return `文件接收中：已接收 ${counts.received}/${counts.total}`;
   return "后台入库处理中";
+}
+
+function parseBatchStatus(value: string | null): BatchStatus | null {
+  if (!value || value === "ALL") return null;
+  return BATCH_STATUSES.includes(value as BatchStatus) ? value as BatchStatus : null;
+}
+
+function parseSourceType(value: string | null): SourceType | null {
+  if (!value || value === "ALL") return null;
+  return SOURCE_TYPES.includes(value as SourceType) ? value as SourceType : null;
 }

@@ -1,9 +1,9 @@
 import { createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
-import Busboy from "busboy";
 import { NextResponse } from "next/server";
 import type { SourceType } from "@prisma/client";
 
@@ -14,10 +14,12 @@ import { byteSizeToBigInt, toJsonSafe } from "@/lib/serialization/bigint-json";
 import { storageService } from "@/lib/storage/storage.service";
 import { getDefaultWorkspaceContext } from "@/lib/workspace/default-workspace.service";
 
-import { metadataFromJson, serializeUploadJob, validateUploadCategory } from "../../_shared";
+import { metadataFromForm, metadataFromJson, serializeUploadJob, validateUploadCategory, validateUploadFile } from "../../_shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const runtimeRequire = createRequire(import.meta.url);
 
 export async function POST(request: Request, context: { params: Promise<{ batchId: string }> }) {
   const auth = await requireApiUser(request);
@@ -107,6 +109,14 @@ type StreamedUploadResult =
   | { error: string; status: 400 | 500 };
 
 type UploadDestination = Awaited<ReturnType<typeof storageService.createIncomingPath>>;
+type BusboyFactory = (config: {
+  headers: Record<string, string>;
+  defParamCharset?: string;
+  limits?: {
+    fields?: number;
+    fieldSize?: number;
+  };
+}) => NodeJS.EventEmitter & NodeJS.WritableStream;
 
 async function receiveMultipartUpload(request: Request, sourceType: SourceType): Promise<StreamedUploadResult> {
   const contentType = request.headers.get("content-type") || "";
@@ -116,6 +126,9 @@ async function receiveMultipartUpload(request: Request, sourceType: SourceType):
   if (!request.body) {
     return { error: "上传请求没有文件内容。", status: 400 };
   }
+
+  const Busboy = loadBusboy();
+  if (!Busboy) return receiveMultipartUploadWithFormData(request, sourceType);
 
   const fields: Record<string, unknown> = {};
   let destination: UploadDestination | undefined;
@@ -223,4 +236,53 @@ async function receiveMultipartUpload(request: Request, sourceType: SourceType):
     fileSize: byteSizeToBigInt(fileSize),
     mimeType
   };
+}
+
+async function receiveMultipartUploadWithFormData(request: Request, sourceType: SourceType): Promise<StreamedUploadResult> {
+  try {
+    const form = await request.formData();
+    const fileResult = validateUploadFile(form.get("file") instanceof File ? form.get("file") as File : null);
+    if ("error" in fileResult) {
+      return { error: fileResult.error || "请选择要上传的文件。", status: fileResult.status || 400 };
+    }
+
+    const file = fileResult.file;
+    const destination = await storageService.createIncomingPath(sourceType, file.name);
+    const partPath = `${destination.absolutePath}.part`;
+    try {
+      await pipeline(
+        Readable.fromWeb(file.stream() as unknown as NodeReadableStream<Uint8Array>),
+        createWriteStream(partPath, { flags: "wx" })
+      );
+      await fs.rename(partPath, destination.absolutePath);
+    } catch (error) {
+      await fs.unlink(partPath).catch(() => undefined);
+      await fs.unlink(destination.absolutePath).catch(() => undefined);
+      throw error;
+    }
+
+    return {
+      metadata: metadataFromForm(form),
+      destination,
+      fileName: file.name,
+      fileSize: byteSizeToBigInt(file.size),
+      mimeType: file.type || ""
+    };
+  } catch (error) {
+    return {
+      error: `浏览器上传失败：${error instanceof Error ? error.message : String(error)}。请确认网络未中断、磁盘空间足够、存储目录可写后重试。`,
+      status: 500
+    };
+  }
+}
+
+function loadBusboy(): BusboyFactory | null {
+  try {
+    const packageName = "bus" + "boy";
+    const loaded = runtimeRequire(packageName) as BusboyFactory | { default?: BusboyFactory };
+    if (typeof loaded === "function") return loaded;
+    return typeof loaded.default === "function" ? loaded.default : null;
+  } catch {
+    return null;
+  }
 }

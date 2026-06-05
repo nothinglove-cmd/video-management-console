@@ -18,6 +18,6 @@ export function canCreateRole(actorRole: UserRole, targetRole: UserRole) {
 
 export function menuAllowedRoles(itemId: string): UserRole[] {
   if (["mobile-upload", "desktop-upload", "library"].includes(itemId)) return USER_ROLES;
-  if (["dashboard", "ingest-review", "trash", "device-import", "shooters", "users"].includes(itemId)) return ADMIN_ROLES;
+  if (["dashboard", "ingest-review", "batches", "trash", "device-import", "shooters", "users"].includes(itemId)) return ADMIN_ROLES;
   return SUPER_ADMIN_ROLES;
 }

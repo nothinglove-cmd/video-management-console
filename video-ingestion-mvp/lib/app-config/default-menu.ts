@@ -54,6 +54,14 @@ export const DEFAULT_MENU_ITEMS: readonly AppMenuItem[] = [
     dashboardDescription: "处理待确认素材"
   },
   {
+    id: "batches",
+    href: "/admin/batches",
+    label: "批次中心",
+    iconKey: "archive",
+    placements: ["sidebar", "dashboard"],
+    dashboardDescription: "追踪批次进度和失败重试"
+  },
+  {
     id: "library",
     href: "/admin/library",
     label: "素材库",

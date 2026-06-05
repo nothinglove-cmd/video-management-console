@@ -1,16 +1,16 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import ffmpegStaticPath from "ffmpeg-static";
-import ffprobeStatic from "ffprobe-static";
 
 const projectRoot = process.cwd();
+const runtimeRequire = createRequire(import.meta.url);
 
 export function resolveMediaBinary(binaryName: "ffmpeg" | "ffprobe") {
   const envPath = binaryName === "ffmpeg" ? process.env.FFMPEG_PATH : process.env.FFPROBE_PATH;
   const candidates = [
     envPath,
     runtimeBinaryPath(binaryName),
-    binaryName === "ffmpeg" ? ffmpegStaticPath || "" : ffprobeStatic.path,
+    binaryName === "ffmpeg" ? optionalFfmpegStaticPath() : optionalFfprobeStaticPath(),
     binaryName
   ].filter((value): value is string => Boolean(value));
 
@@ -28,5 +28,26 @@ function isExecutableFile(filePath: string) {
     return fs.statSync(filePath).isFile();
   } catch {
     return false;
+  }
+}
+
+function optionalFfmpegStaticPath() {
+  try {
+    const packageName = "ffmpeg" + "-static";
+    const loaded = runtimeRequire(packageName) as string | { default?: string | null } | null;
+    if (typeof loaded === "string") return loaded;
+    return loaded?.default || "";
+  } catch {
+    return "";
+  }
+}
+
+function optionalFfprobeStaticPath() {
+  try {
+    const packageName = "ffprobe" + "-static";
+    const loaded = runtimeRequire(packageName) as { path?: string; default?: { path?: string } } | null;
+    return loaded?.path || loaded?.default?.path || "";
+  } catch {
+    return "";
   }
 }

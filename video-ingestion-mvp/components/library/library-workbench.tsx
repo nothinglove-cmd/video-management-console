@@ -135,6 +135,7 @@ export function LibraryWorkbench() {
   const pagination = payload.pagination || DEFAULT_PAGINATION;
   const materials = payload.materials;
   const canManageMaterials = currentUser?.role === "SUPER_ADMIN" || currentUser?.role === "ADMIN";
+  const canSelectMaterials = Boolean(currentUser);
   const uploaders = payload.facets?.uploaders || [];
   const categoryPrefix = selection.type === "category" ? selection.category.relativePath || "" : "";
   const selectedCategoryId = selection.type === "category" ? selection.category.id : "";
@@ -264,19 +265,56 @@ export function LibraryWorkbench() {
     setSelectedIds([]);
   }
 
-  const drawerActions: MaterialActions = canManageMaterials
-    ? {
-        rename: (material) => handleAction("rename", material),
-        move: (material) => handleAction("move", material),
-        editTags: (material) => handleAction("tags", material),
-        trash: (material) => handleAction("trash", material),
-        reanalyze: (material) => handleAction("reanalyze", material),
-        regenerateDerivatives: (material) => handleAction("regenerateDerivatives", material),
-        applyAiSuggestion: (material) => handleAction("applyAiSuggestion", material),
-        confirm: (material) => handleAction("confirm", material),
-        addToPackage: (material) => handleAction("package", material)
-      }
-    : {};
+  async function exportSelection(format: "json" | "csv") {
+    if (selectedIds.length === 0) {
+      setMessage("请先选择素材。");
+      return;
+    }
+    setBusy(`export-${format}`);
+    setMessage("");
+    const response = await fetch("/api/materials/batch/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: selectedIds, format })
+    });
+    setBusy("");
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      setMessage(data.error || "精选包清单导出失败。");
+      return;
+    }
+    const blob = await response.blob();
+    const fileName = downloadFileName(response.headers.get("content-disposition"), `selection.${format}`);
+    downloadBlob(blob, fileName);
+    setMessage(`已导出精选包清单：${selectedIds.length} 个素材。`);
+  }
+
+  function downloadSelectionPackage(variant: "original" | "preview") {
+    if (selectedIds.length === 0) {
+      setMessage("请先选择素材。");
+      return;
+    }
+    const params = new URLSearchParams({
+      ids: selectedIds.join(","),
+      variant
+    });
+    window.open(`/api/materials/batch/download?${params.toString()}`, "_blank", "noopener,noreferrer");
+    setMessage(variant === "preview" ? `正在生成预览文件包：${selectedIds.length} 个素材。` : `正在生成原文件包：${selectedIds.length} 个素材。`);
+  }
+
+  const drawerActions: MaterialActions = {
+    ...(canManageMaterials ? {
+      rename: (material: MaterialDto) => handleAction("rename", material),
+      move: (material: MaterialDto) => handleAction("move", material),
+      editTags: (material: MaterialDto) => handleAction("tags", material),
+      trash: (material: MaterialDto) => handleAction("trash", material),
+      reanalyze: (material: MaterialDto) => handleAction("reanalyze", material),
+      regenerateDerivatives: (material: MaterialDto) => handleAction("regenerateDerivatives", material),
+      applyAiSuggestion: (material: MaterialDto) => handleAction("applyAiSuggestion", material),
+      confirm: (material: MaterialDto) => handleAction("confirm", material)
+    } : {}),
+    addToPackage: (material) => handleAction("package", material)
+  };
 
   return (
     <div
@@ -371,6 +409,7 @@ export function LibraryWorkbench() {
               onOpen={setActiveMaterial}
               onPreview={setPreviewMaterial}
               onAction={handleAction}
+              canSelect={canSelectMaterials}
               canManage={canManageMaterials}
             />
           ) : (
@@ -383,6 +422,7 @@ export function LibraryWorkbench() {
               onOpen={setActiveMaterial}
               onPreview={setPreviewMaterial}
               onAction={handleAction}
+              canSelect={canSelectMaterials}
               canManage={canManageMaterials}
             />
           )
@@ -409,12 +449,16 @@ export function LibraryWorkbench() {
         onPreview={setPreviewMaterial}
       />
 
-      {canManageMaterials && selectedIds.length > 0 ? (
+      {selectedIds.length > 0 ? (
         <BatchActionBar
           count={selectedIds.length}
+          canManage={canManageMaterials}
           onMove={() => batch("move")}
           onEditTags={() => setMessage("批量编辑标签后续接入批量标签 API。")}
-          onAddToPackage={() => setMessage("批量加入精选包是占位功能，后续阶段实现。")}
+          onExportJson={() => exportSelection("json")}
+          onExportCsv={() => exportSelection("csv")}
+          onDownloadOriginals={() => downloadSelectionPackage("original")}
+          onDownloadPreviews={() => downloadSelectionPackage("preview")}
           onReanalyze={() => batch("reanalyze")}
           onTrash={() => batch("trash")}
           onCancel={() => setSelectedIds([])}
@@ -447,7 +491,7 @@ export function LibraryWorkbench() {
   );
 
   function handleAction(action: string, material: MaterialDto) {
-    if (!canManageMaterials && action !== "preview") {
+    if (!canManageMaterials && action !== "preview" && action !== "package") {
       setMessage("当前账号只有素材库只读权限。");
       return;
     }
@@ -464,7 +508,10 @@ export function LibraryWorkbench() {
     });
     if (action === "applyAiSuggestion") void post(`/api/materials/${material.id}/apply-ai-suggestion`);
     if (action === "confirm") void post(`/api/materials/${material.id}/confirm`);
-    if (action === "package") setMessage("加入精选包是占位功能，后续阶段实现。");
+    if (action === "package") {
+      setSelectedIds((current) => current.includes(material.id) ? current : [...current, material.id]);
+      setMessage(`已加入精选包清单：${material.materialId}`);
+    }
   }
 
   function renderDialog(current: NonNullable<typeof dialog>) {
@@ -861,6 +908,7 @@ function MaterialGrid(props: {
   view: Exclude<ViewMode, "table">;
   selectedIds: string[];
   activeId?: string;
+  canSelect: boolean;
   canManage: boolean;
   onSelect: (id: string, checked: boolean) => void;
   onOpen: (material: MaterialDto) => void;
@@ -882,6 +930,7 @@ function LibraryMaterialCard({
   view,
   selectedIds,
   activeId,
+  canSelect,
   canManage,
   onSelect,
   onOpen,
@@ -892,6 +941,7 @@ function LibraryMaterialCard({
   view: Exclude<ViewMode, "table">;
   selectedIds: string[];
   activeId?: string;
+  canSelect: boolean;
   canManage: boolean;
   onSelect: (id: string, checked: boolean) => void;
   onOpen: (material: MaterialDto) => void;
@@ -922,7 +972,7 @@ function LibraryMaterialCard({
             <span className="rounded-full bg-black/55 p-2 text-white"><Play className="h-4 w-4 fill-current" /></span>
           </span>
         </button>
-        {canManage ? (
+        {canSelect ? (
           <input
             className="absolute left-2 top-2 h-5 w-5 rounded border-white shadow"
             type="checkbox"
@@ -996,7 +1046,7 @@ function getMaterialActionItems(material: MaterialDto, onAction: (action: string
     canManage ? { label: "标签", icon: Tags, onSelect: () => onAction("tags", material) } : null,
     canManage ? { label: "重新识别", icon: RefreshCcw, onSelect: () => onAction("reanalyze", material) } : null,
     canManage ? { label: "重建缩略图/预览", icon: ImagePlus, onSelect: () => onAction("regenerateDerivatives", material) } : null,
-    canManage ? { label: "精选包", icon: PackagePlus, onSelect: () => onAction("package", material) } : null,
+    { label: "加入精选包", icon: PackagePlus, onSelect: () => onAction("package", material) },
     { label: "下载", icon: Download, href: `/api/materials/${material.id}/download` },
     canManage ? { label: "删除", icon: Trash2, onSelect: () => onAction("trash", material), tone: "danger" } : null
   ].filter(Boolean) as ActionMenuItem[];
@@ -1005,6 +1055,7 @@ function getMaterialActionItems(material: MaterialDto, onAction: (action: string
 function LibraryTable(props: {
   materials: MaterialDto[];
   selectedIds: string[];
+  canSelect: boolean;
   canManage: boolean;
   onSelect: (id: string, checked: boolean) => void;
   onOpen: (material: MaterialDto) => void;
@@ -1016,7 +1067,7 @@ function LibraryTable(props: {
       <table className={cn("w-full min-w-[980px]", skin.typography.tableCell)}>
         <thead className={cn(skin.table.header, "sticky top-0 z-10")}>
           <tr>
-            {props.canManage ? <th className="w-12 px-3 py-2 text-left">选择</th> : null}
+            {props.canSelect ? <th className="w-12 px-3 py-2 text-left">选择</th> : null}
             <th className="px-3 py-2 text-left">缩略图</th>
             <th className="px-3 py-2 text-left">{terms.material.idLabel}</th>
             <th className="px-3 py-2 text-left">文件名</th>
@@ -1032,7 +1083,7 @@ function LibraryTable(props: {
         <tbody>
           {props.materials.map((material) => (
             <tr key={material.id} className={skin.table.row}>
-              {props.canManage ? <td className="px-3 py-2 align-middle"><input className="h-4 w-4" type="checkbox" checked={props.selectedIds.includes(material.id)} onChange={(event) => props.onSelect(material.id, event.target.checked)} /></td> : null}
+              {props.canSelect ? <td className="px-3 py-2 align-middle"><input className="h-4 w-4" type="checkbox" checked={props.selectedIds.includes(material.id)} onChange={(event) => props.onSelect(material.id, event.target.checked)} /></td> : null}
               <td className="px-3 py-2">
                 <button type="button" className={cn(skin.media.thumbnail, "h-14 w-20")} onClick={() => props.onPreview(material)}>
                   {material.thumbnailPath ? (
@@ -1279,17 +1330,25 @@ function getEmptyState(selection: DirectorySelection, hasQuery: boolean, hasFilt
 
 function BatchActionBar({
   count,
+  canManage,
   onMove,
   onEditTags,
-  onAddToPackage,
+  onExportJson,
+  onExportCsv,
+  onDownloadOriginals,
+  onDownloadPreviews,
   onReanalyze,
   onTrash,
   onCancel
 }: {
   count: number;
+  canManage: boolean;
   onMove: () => void;
   onEditTags: () => void;
-  onAddToPackage: () => void;
+  onExportJson: () => void;
+  onExportCsv: () => void;
+  onDownloadOriginals: () => void;
+  onDownloadPreviews: () => void;
   onReanalyze: () => void;
   onTrash: () => void;
   onCancel: () => void;
@@ -1298,17 +1357,50 @@ function BatchActionBar({
     <div className={skin.responsive.mobileActionBar}>
       <StatusPill tone="info" withDot className="shrink-0">已选择 {count} 个{terms.material.singular}</StatusPill>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-        <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onMove}>批量移动</Button>
-        <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onEditTags}>批量编辑标签</Button>
-        <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onAddToPackage}><PackagePlus className="mr-1 h-3.5 w-3.5" /> 批量加入精选包</Button>
-        <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onReanalyze}><RefreshCcw className="mr-1 h-3.5 w-3.5" /> 批量重新识别</Button>
+        <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="default" size="sm" onClick={onDownloadOriginals}>
+          <Download className="mr-1 h-3.5 w-3.5" /> 下载原文件包
+        </Button>
+        <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onDownloadPreviews}>
+          <Download className="mr-1 h-3.5 w-3.5" /> 下载预览包
+        </Button>
+        <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onExportCsv}>
+          <Download className="mr-1 h-3.5 w-3.5" /> 导出 CSV
+        </Button>
+        <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onExportJson}>
+          <PackagePlus className="mr-1 h-3.5 w-3.5" /> 导出 JSON
+        </Button>
+        {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onMove}>批量移动</Button> : null}
+        {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onEditTags}>批量编辑标签</Button> : null}
+        {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onReanalyze}><RefreshCcw className="mr-1 h-3.5 w-3.5" /> 批量重新识别</Button> : null}
       </div>
       <div className="flex w-full flex-wrap items-center gap-2 border-t border-[color:var(--skin-border-subtle)] pt-2 sm:w-auto sm:border-t-0 sm:pt-0">
         <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="ghost" size="sm" onClick={onCancel}><X className="mr-1 h-3.5 w-3.5" /> 取消选择</Button>
-        <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="destructive" size="sm" onClick={onTrash}><Trash2 className="mr-1 h-3.5 w-3.5" /> 批量删除</Button>
+        {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="destructive" size="sm" onClick={onTrash}><Trash2 className="mr-1 h-3.5 w-3.5" /> 批量删除</Button> : null}
       </div>
     </div>
   );
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function downloadFileName(contentDisposition: string | null, fallback: string) {
+  if (!contentDisposition) return fallback;
+  const match = /filename\*=UTF-8''([^;]+)/.exec(contentDisposition);
+  if (!match?.[1]) return fallback;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return fallback;
+  }
 }
 
 function hasActiveLibraryFilters(status: string, uploader: string, dateRange: string, confidence: string, issue: string) {
