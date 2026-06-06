@@ -70,6 +70,14 @@ export const DEFAULT_MENU_ITEMS: readonly AppMenuItem[] = [
     dashboardDescription: "查看全部素材"
   },
   {
+    id: "packages",
+    href: "/admin/packages",
+    label: "精选包",
+    iconKey: "folderKanban",
+    placements: ["sidebar", "dashboard"],
+    dashboardDescription: "管理长期剪辑交付包"
+  },
+  {
     id: "categories",
     href: "/admin/categories",
     label: "栏目管理",

@@ -55,6 +55,7 @@ import { ResponsiveTableShell } from "@/components/ui/responsive-table-shell";
 import { Select } from "@/components/ui/select";
 import { StatusPill } from "@/components/ui/status-pill";
 import { Panel, Surface } from "@/components/ui/surface";
+import { Textarea } from "@/components/ui/textarea";
 import { ActionMenu, type ActionMenuItem } from "@/components/ui/action-menu";
 import { getRuntimeAppConfig } from "@/lib/app-config/runtime-config";
 import { cn, toLocalDateTime } from "@/lib/utils";
@@ -87,6 +88,19 @@ type DialogState =
   | { type: "batchMove"; material: MaterialDto }
   | null;
 
+type PackageOptionDto = {
+  packageId: string;
+  name: string;
+  purpose?: string | null;
+  status: "ACTIVE" | "ARCHIVED" | "DELETED";
+  itemCount: number;
+};
+
+type PackageDialogState =
+  | { type: "existing"; ids: string[] }
+  | { type: "create"; ids: string[] }
+  | null;
+
 const DEFAULT_PAGINATION: PaginationDto = { total: 0, page: 1, pageSize: 48, pageCount: 1 };
 const { terminology: terms } = getRuntimeAppConfig();
 
@@ -115,6 +129,8 @@ export function LibraryWorkbench() {
   const [previewMaterial, setPreviewMaterial] = useState<MaterialDto | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [packageDialog, setPackageDialog] = useState<PackageDialogState>(null);
+  const [packageOptions, setPackageOptions] = useState<PackageOptionDto[]>([]);
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [status, setStatus] = useState("ALL");
@@ -176,6 +192,13 @@ export function LibraryWorkbench() {
     const response = await fetch("/api/auth/me", { cache: "no-store" });
     const data = await response.json().catch(() => null) as { user?: CurrentUser | null } | null;
     setCurrentUser(data?.user || null);
+  }
+
+  async function loadPackageOptions() {
+    const response = await fetch("/api/packages?status=ACTIVE&limit=200", { cache: "no-store" });
+    const data = await response.json().catch(() => null) as { packages?: PackageOptionDto[]; error?: string } | null;
+    if (!response.ok || !data) throw new Error(data?.error || "精选包列表加载失败。");
+    setPackageOptions(data.packages || []);
   }
 
   async function refresh() {
@@ -300,6 +323,61 @@ export function LibraryWorkbench() {
     });
     window.open(`/api/materials/batch/download?${params.toString()}`, "_blank", "noopener,noreferrer");
     setMessage(variant === "preview" ? `正在生成预览文件包：${selectedIds.length} 个素材。` : `正在生成原文件包：${selectedIds.length} 个素材。`);
+  }
+
+  async function openPackageDialog(type: "existing" | "create", ids = selectedIds) {
+    if (!canManageMaterials) {
+      setMessage("当前账号没有管理精选包权限。");
+      return;
+    }
+    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+    if (uniqueIds.length === 0) {
+      setMessage("请先选择素材。");
+      return;
+    }
+    setMessage("");
+    setPackageDialog({ type, ids: uniqueIds });
+    if (type === "existing") {
+      try {
+        await loadPackageOptions();
+      } catch (error) {
+        setMessage((error as Error).message);
+      }
+    }
+  }
+
+  async function addMaterialsToPackage(packageId: string, ids: string[]) {
+    setBusy("package-add");
+    const response = await fetch(`/api/packages/${encodeURIComponent(packageId)}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids })
+    });
+    const data = await response.json().catch(() => null) as { addedCount?: number; skippedCount?: number; error?: string } | null;
+    setBusy("");
+    if (!response.ok || !data) {
+      setMessage(data?.error || "加入精选包失败。");
+      return false;
+    }
+    setMessage(`已加入精选包：新增 ${data.addedCount || 0} 个，已存在 ${data.skippedCount || 0} 个。`);
+    setPackageDialog(null);
+    return true;
+  }
+
+  async function createPackageAndAdd(payload: { name: string; purpose?: string; notes?: string }, ids: string[]) {
+    setBusy("package-create");
+    const createResponse = await fetch("/api/packages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const created = await createResponse.json().catch(() => null) as { package?: PackageOptionDto; error?: string } | null;
+    setBusy("");
+    if (!createResponse.ok || !created?.package) {
+      setMessage(created?.error || "创建精选包失败。");
+      return false;
+    }
+    return addMaterialsToPackage(created.package.packageId, ids);
   }
 
   const drawerActions: MaterialActions = {
@@ -459,6 +537,8 @@ export function LibraryWorkbench() {
           onExportCsv={() => exportSelection("csv")}
           onDownloadOriginals={() => downloadSelectionPackage("original")}
           onDownloadPreviews={() => downloadSelectionPackage("preview")}
+          onAddToPackage={() => openPackageDialog("existing")}
+          onCreatePackage={() => openPackageDialog("create")}
           onReanalyze={() => batch("reanalyze")}
           onTrash={() => batch("trash")}
           onCancel={() => setSelectedIds([])}
@@ -485,6 +565,17 @@ export function LibraryWorkbench() {
           </div>
         </div>
       ) : null}
+      {packageDialog ? (
+        <PackageSelectionDialog
+          state={packageDialog}
+          packages={packageOptions}
+          busy={busy}
+          onClose={() => setPackageDialog(null)}
+          onLoadPackages={() => loadPackageOptions().catch((error) => setMessage(error.message))}
+          onAdd={(packageId) => addMaterialsToPackage(packageId, packageDialog.ids)}
+          onCreate={(payload) => createPackageAndAdd(payload, packageDialog.ids)}
+        />
+      ) : null}
       {dialog ? renderDialog(dialog) : null}
       {busy ? <div className={cn("fixed bottom-4 right-4 z-50 rounded-[var(--skin-radius-control)] bg-slate-950 px-3 py-2 text-white shadow-[var(--skin-shadow-elevated)]", skin.typography.body)}>处理中...</div> : null}
     </div>
@@ -509,8 +600,7 @@ export function LibraryWorkbench() {
     if (action === "applyAiSuggestion") void post(`/api/materials/${material.id}/apply-ai-suggestion`);
     if (action === "confirm") void post(`/api/materials/${material.id}/confirm`);
     if (action === "package") {
-      setSelectedIds((current) => current.includes(material.id) ? current : [...current, material.id]);
-      setMessage(`已加入精选包清单：${material.materialId}`);
+      void openPackageDialog("existing", [material.id]);
     }
   }
 
@@ -1337,6 +1427,8 @@ function BatchActionBar({
   onExportCsv,
   onDownloadOriginals,
   onDownloadPreviews,
+  onAddToPackage,
+  onCreatePackage,
   onReanalyze,
   onTrash,
   onCancel
@@ -1349,6 +1441,8 @@ function BatchActionBar({
   onExportCsv: () => void;
   onDownloadOriginals: () => void;
   onDownloadPreviews: () => void;
+  onAddToPackage: () => void;
+  onCreatePackage: () => void;
   onReanalyze: () => void;
   onTrash: () => void;
   onCancel: () => void;
@@ -1369,6 +1463,8 @@ function BatchActionBar({
         <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onExportJson}>
           <PackagePlus className="mr-1 h-3.5 w-3.5" /> 导出 JSON
         </Button>
+        {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onAddToPackage}><PackagePlus className="mr-1 h-3.5 w-3.5" /> 加入已有精选包</Button> : null}
+        {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onCreatePackage}><PackagePlus className="mr-1 h-3.5 w-3.5" /> 新建精选包并加入</Button> : null}
         {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onMove}>批量移动</Button> : null}
         {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onEditTags}>批量编辑标签</Button> : null}
         {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onReanalyze}><RefreshCcw className="mr-1 h-3.5 w-3.5" /> 批量重新识别</Button> : null}
@@ -1377,6 +1473,88 @@ function BatchActionBar({
         <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="ghost" size="sm" onClick={onCancel}><X className="mr-1 h-3.5 w-3.5" /> 取消选择</Button>
         {canManage ? <Button className="min-h-[var(--skin-touch-target-min-height)] flex-1 sm:flex-none" variant="destructive" size="sm" onClick={onTrash}><Trash2 className="mr-1 h-3.5 w-3.5" /> 批量删除</Button> : null}
       </div>
+    </div>
+  );
+}
+
+function PackageSelectionDialog({
+  state,
+  packages,
+  busy,
+  onClose,
+  onLoadPackages,
+  onAdd,
+  onCreate
+}: {
+  state: NonNullable<PackageDialogState>;
+  packages: PackageOptionDto[];
+  busy: string;
+  onClose: () => void;
+  onLoadPackages: () => void;
+  onAdd: (packageId: string) => Promise<boolean>;
+  onCreate: (payload: { name: string; purpose?: string; notes?: string }) => Promise<boolean>;
+}) {
+  const [selectedPackageId, setSelectedPackageId] = useState("");
+  const [form, setForm] = useState({ name: "", purpose: "", notes: "" });
+
+  useEffect(() => {
+    if (state.type !== "existing") return;
+    if (!selectedPackageId && packages[0]) setSelectedPackageId(packages[0].packageId);
+  }, [packages, selectedPackageId, state.type]);
+
+  async function submitExisting() {
+    if (!selectedPackageId) return;
+    await onAdd(selectedPackageId);
+  }
+
+  async function submitCreate() {
+    if (!form.name.trim()) return;
+    await onCreate(form);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color:var(--skin-overlay)] p-4">
+      <Panel className="w-full max-w-[var(--skin-modal-width-md)] space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className={skin.typography.panelTitle}>{state.type === "existing" ? "加入已有精选包" : "新建精选包并加入"}</h3>
+            <p className={cn("mt-1 text-muted-foreground", skin.typography.meta)}>本次将处理 {state.ids.length} 个已选素材。</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="关闭">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {state.type === "existing" ? (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <Select className="min-w-0 flex-1" value={selectedPackageId} onChange={(event) => setSelectedPackageId(event.target.value)}>
+                {packages.map((pkg) => (
+                  <option key={pkg.packageId} value={pkg.packageId}>
+                    {pkg.name} · {pkg.packageId} · {pkg.itemCount} 个素材
+                  </option>
+                ))}
+              </Select>
+              <Button variant="secondary" onClick={onLoadPackages}><RefreshCcw className="mr-1.5 h-4 w-4" /> 刷新</Button>
+            </div>
+            {!packages.length ? <Surface tone="muted" padding="sm" className={cn(skin.typography.meta, "text-muted-foreground")}>还没有使用中的精选包，可以切换为新建后加入。</Surface> : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" onClick={onClose}>取消</Button>
+              <Button disabled={!selectedPackageId || busy === "package-add"} onClick={submitExisting}>加入精选包</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <Input value={form.name} placeholder="包名称" onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+            <Input value={form.purpose} placeholder="用途" onChange={(event) => setForm((current) => ({ ...current, purpose: event.target.value }))} />
+            <Textarea value={form.notes} placeholder="备注" onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} />
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" onClick={onClose}>取消</Button>
+              <Button disabled={!form.name.trim() || busy === "package-create" || busy === "package-add"} onClick={submitCreate}>创建并加入</Button>
+            </div>
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }

@@ -75,6 +75,16 @@ enum OperationType {
   ADD_TO_PACKAGE
 }
 
+enum MaterialPackageStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum MaterialUsageType {
+  PACKAGE
+}
+
 enum ConfigStatus {
   ACTIVE
   DISABLED
@@ -173,6 +183,7 @@ model Workspace {
   aiAnalysisJobs        AIAnalysisJob[]
   aiProviderConfigs     AIProviderConfig[]
   userAccounts          UserAccount[]
+  materialPackages      MaterialPackage[]
 
   @@index([status])
   @@index([defaultStorageProviderId])
@@ -532,6 +543,8 @@ model Material {
   operationLogs     FileOperationLog[]
   derivativeFiles   DerivativeFile[]
   aiAnalysisJobs    AIAnalysisJob[]
+  packageItems      MaterialPackageItem[]
+  usages            MaterialUsage[]
 
   @@index([workspaceId])
   @@index([storageProviderId])
@@ -552,6 +565,60 @@ model Material {
   @@index([contentIntent])
   @@index([contentLongevity])
   @@index([topicName])
+}
+
+model MaterialPackage {
+  id            String                @id @default(cuid())
+  workspaceId   String?
+  workspace     Workspace?            @relation(fields: [workspaceId], references: [id])
+  packageId     String                @unique
+  name          String
+  purpose       String?
+  description   String?
+  notes         String?
+  status        MaterialPackageStatus @default(ACTIVE)
+  createdByName String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  items         MaterialPackageItem[]
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model MaterialPackageItem {
+  id         String          @id @default(cuid())
+  packageId  String
+  package    MaterialPackage @relation(fields: [packageId], references: [packageId], onDelete: Cascade)
+  materialId String
+  material   Material        @relation(fields: [materialId], references: [materialId])
+  sortOrder  Int             @default(0)
+  notes      String?
+  createdAt  DateTime        @default(now())
+
+  @@unique([packageId, materialId])
+  @@index([packageId])
+  @@index([materialId])
+  @@index([sortOrder])
+}
+
+model MaterialUsage {
+  id             String            @id @default(cuid())
+  materialId     String
+  material       Material          @relation(fields: [materialId], references: [materialId])
+  usageType      MaterialUsageType @default(PACKAGE)
+  usageRefId     String
+  usageRefLabel  String?
+  notes          String?
+  createdByName  String?
+  createdAt      DateTime          @default(now())
+
+  @@unique([materialId, usageType, usageRefId])
+  @@index([materialId])
+  @@index([usageType])
+  @@index([usageRefId])
+  @@index([createdAt])
 }
 
 model IngestionJob {

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
@@ -32,6 +33,18 @@ import { cn, formatBytes, formatDuration, toLocalDateTime } from "@/lib/utils";
 
 const { terminology: terms } = getRuntimeAppConfig();
 type DetailTab = "overview" | "classification" | "ai" | "records";
+type MaterialUsageDto = {
+  id: string;
+  usageType: string;
+  usageRefId: string;
+  usageRefLabel?: string | null;
+  packageName?: string | null;
+  packageStatus?: string | null;
+  notes?: string | null;
+  createdByName?: string | null;
+  createdAt: string;
+};
+
 const DETAIL_TABS: TabItem<DetailTab>[] = [
   { value: "overview", label: "概览" },
   { value: "classification", label: "分类与标签" },
@@ -51,11 +64,28 @@ export function MaterialDetailDrawer({
   onPreview: (material: MaterialDto) => void;
 }) {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  const [usages, setUsages] = useState<MaterialUsageDto[]>([]);
+  const [usageLoading, setUsageLoading] = useState(false);
 
   useEffect(() => {
     if (material?.id) {
       setActiveTab("overview");
     }
+  }, [material?.id]);
+
+  useEffect(() => {
+    if (!material?.id) {
+      setUsages([]);
+      return;
+    }
+    const controller = new AbortController();
+    setUsageLoading(true);
+    fetch(`/api/materials/${encodeURIComponent(material.id)}/usage`, { cache: "no-store", signal: controller.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: { usages?: MaterialUsageDto[] } | null) => setUsages(data?.usages || []))
+      .catch(() => undefined)
+      .finally(() => setUsageLoading(false));
+    return () => controller.abort();
   }, [material?.id]);
 
   if (!material) return null;
@@ -289,6 +319,28 @@ export function MaterialDetailDrawer({
 
         {activeTab === "records" ? (
           <>
+            <Section title="使用记录">
+              <div className="space-y-2">
+                {usages.map((usage) => (
+                  <Surface key={usage.id} tone="muted" padding="sm" className={skin.textDensity.history}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-semibold">{usage.usageType === "PACKAGE" ? "精选包" : usage.usageType}</p>
+                        <Link className="mt-1 block break-words text-primary hover:underline" href={`/admin/packages/${encodeURIComponent(usage.usageRefId)}`}>
+                          {usage.packageName || usage.usageRefLabel || usage.usageRefId}
+                        </Link>
+                      </div>
+                      <p className="text-muted-foreground">{toLocalDateTime(usage.createdAt)}</p>
+                    </div>
+                    {usage.createdByName ? <p className="mt-1 text-muted-foreground">创建人：{usage.createdByName}</p> : null}
+                    {usage.notes ? <p className="mt-1 text-muted-foreground">{usage.notes}</p> : null}
+                  </Surface>
+                ))}
+                {usageLoading ? <Surface tone="muted" className={cn(skin.textDensity.value, "text-muted-foreground")}>正在读取使用记录...</Surface> : null}
+                {!usageLoading && !usages.length ? <Surface tone="muted" className={cn(skin.textDensity.value, "text-muted-foreground")}>暂无精选包或其他使用记录。</Surface> : null}
+              </div>
+            </Section>
+
             <Section title="metadata JSON 摘要">
               <pre className={cn("max-h-48 overflow-auto rounded-[var(--skin-radius-card)] bg-slate-950 p-3 text-slate-100", skin.textDensity.metadata)}>
             {JSON.stringify(
