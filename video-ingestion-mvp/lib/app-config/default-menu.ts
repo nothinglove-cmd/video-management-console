@@ -78,6 +78,14 @@ export const DEFAULT_MENU_ITEMS: readonly AppMenuItem[] = [
     dashboardDescription: "管理长期剪辑交付包"
   },
   {
+    id: "finished-works",
+    href: "/admin/finished-works",
+    label: "成片记录",
+    iconKey: "archive",
+    placements: ["sidebar", "dashboard"],
+    dashboardDescription: "追踪素材真实使用闭环"
+  },
+  {
     id: "categories",
     href: "/admin/categories",
     label: "栏目管理",

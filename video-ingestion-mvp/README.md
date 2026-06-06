@@ -11,7 +11,7 @@ AI 素材入库系统的 Next.js MVP 应用。本版本面向本地电脑或 NAS
 - AI 标签、摘要、命名建议和栏目建议，默认可用 mock provider 跑通流程。
 - 素材库搜索、筛选、预览、下载、移动、改名、标签、回收站。
 - 批次中心集中追踪上传/设备导入批次、后台任务、失败原因和失败项重试。
-- 持久化精选包和素材使用记录，支持素材库多选加入包、包内原文件/预览文件 tar 下载、JSON / CSV 清单导出。
+- 持久化精选包、成片/交付记录和素材使用记录，支持素材库多选加入包、包内原文件/预览文件 tar 下载、JSON / CSV 清单导出，并追踪素材实际用于哪些成片。
 - 存储巡检、低风险修复和系统重置类维护工具。
 - 本地账号登录、httpOnly 会话和三层权限。
 - 全新安装器可自动准备项目专用 Node.js、依赖、FFmpeg、数据库和初始超级管理员。
@@ -187,6 +187,7 @@ NODE
 - `/admin/library`：素材库
 - `/admin/batches`：批次中心
 - `/admin/packages`：精选包
+- `/admin/finished-works`：成片记录
 - `/admin/ingest-review`：入库确认
 - `/admin/device-import`：设备拷贝导入
 - `/admin/categories`：栏目管理

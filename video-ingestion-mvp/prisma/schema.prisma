@@ -83,6 +83,23 @@ enum MaterialPackageStatus {
 
 enum MaterialUsageType {
   PACKAGE
+  FINISHED_WORK
+}
+
+enum FinishedWorkStatus {
+  DRAFT
+  IN_PROGRESS
+  DELIVERED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum FinishedWorkMaterialRole {
+  MAIN_CLIP
+  B_ROLL
+  COVER
+  AUDIO
+  OTHER
 }
 
 enum ConfigStatus {
@@ -184,6 +201,7 @@ model Workspace {
   aiProviderConfigs     AIProviderConfig[]
   userAccounts          UserAccount[]
   materialPackages      MaterialPackage[]
+  finishedWorks         FinishedWork[]
 
   @@index([status])
   @@index([defaultStorageProviderId])
@@ -545,6 +563,7 @@ model Material {
   aiAnalysisJobs    AIAnalysisJob[]
   packageItems      MaterialPackageItem[]
   usages            MaterialUsage[]
+  finishedWorkItems FinishedWorkMaterial[]
 
   @@index([workspaceId])
   @@index([storageProviderId])
@@ -581,6 +600,7 @@ model MaterialPackage {
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   items         MaterialPackageItem[]
+  finishedWorks FinishedWork[]
 
   @@index([workspaceId])
   @@index([status])
@@ -600,6 +620,48 @@ model MaterialPackageItem {
   @@unique([packageId, materialId])
   @@index([packageId])
   @@index([materialId])
+  @@index([sortOrder])
+}
+
+model FinishedWork {
+  id            String             @id @default(cuid())
+  workspaceId   String?
+  workspace     Workspace?         @relation(fields: [workspaceId], references: [id])
+  workId        String             @unique
+  title         String
+  platform      String?
+  purpose       String?
+  status        FinishedWorkStatus @default(DRAFT)
+  packageId     String?
+  package       MaterialPackage?   @relation(fields: [packageId], references: [packageId])
+  notes         String?
+  createdByName String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  materials     FinishedWorkMaterial[]
+
+  @@index([workspaceId])
+  @@index([packageId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model FinishedWorkMaterial {
+  id              String                   @id @default(cuid())
+  workId          String
+  work            FinishedWork             @relation(fields: [workId], references: [workId], onDelete: Cascade)
+  materialId      String
+  material        Material                 @relation(fields: [materialId], references: [materialId])
+  sourcePackageId String?
+  role            FinishedWorkMaterialRole @default(OTHER)
+  sortOrder       Int                      @default(0)
+  notes           String?
+  createdAt       DateTime                 @default(now())
+
+  @@unique([workId, materialId])
+  @@index([workId])
+  @@index([materialId])
+  @@index([sourcePackageId])
   @@index([sortOrder])
 }
 

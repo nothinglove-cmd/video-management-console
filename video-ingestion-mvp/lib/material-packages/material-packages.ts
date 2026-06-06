@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Material, MaterialPackage, MaterialPackageItem, MaterialPackageStatus, MaterialUsage } from "@prisma/client";
+import type { FinishedWork, Material, MaterialPackage, MaterialPackageItem, MaterialPackageStatus, MaterialUsage } from "@prisma/client";
 
 import { byteSizeToSafeNumber } from "@/lib/serialization/bigint-json";
 
@@ -77,8 +77,13 @@ export function toPackageMaterialDto(material: Material) {
   };
 }
 
-export function toUsageDto(usage: UsageWithMaterial, packageById?: Map<string, MaterialPackage>) {
+export function toUsageDto(
+  usage: UsageWithMaterial,
+  packageById?: Map<string, MaterialPackage>,
+  finishedWorkById?: Map<string, FinishedWork>
+) {
   const pkg = packageById?.get(usage.usageRefId);
+  const work = finishedWorkById?.get(usage.usageRefId);
   return {
     id: usage.id,
     materialId: usage.materialId,
@@ -87,6 +92,9 @@ export function toUsageDto(usage: UsageWithMaterial, packageById?: Map<string, M
     usageRefLabel: usage.usageRefLabel,
     packageName: pkg?.name || usage.usageRefLabel || usage.usageRefId,
     packageStatus: pkg?.status,
+    finishedWorkTitle: work?.title || usage.usageRefLabel || usage.usageRefId,
+    finishedWorkStatus: work?.status,
+    finishedWorkPlatform: work?.platform,
     notes: usage.notes,
     createdByName: usage.createdByName,
     createdAt: usage.createdAt.toISOString()

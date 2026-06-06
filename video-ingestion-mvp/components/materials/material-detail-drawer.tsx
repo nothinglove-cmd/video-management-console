@@ -40,6 +40,9 @@ type MaterialUsageDto = {
   usageRefLabel?: string | null;
   packageName?: string | null;
   packageStatus?: string | null;
+  finishedWorkTitle?: string | null;
+  finishedWorkStatus?: string | null;
+  finishedWorkPlatform?: string | null;
   notes?: string | null;
   createdByName?: string | null;
   createdAt: string;
@@ -325,10 +328,13 @@ export function MaterialDetailDrawer({
                   <Surface key={usage.id} tone="muted" padding="sm" className={skin.textDensity.history}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="font-semibold">{usage.usageType === "PACKAGE" ? "精选包" : usage.usageType}</p>
-                        <Link className="mt-1 block break-words text-primary hover:underline" href={`/admin/packages/${encodeURIComponent(usage.usageRefId)}`}>
-                          {usage.packageName || usage.usageRefLabel || usage.usageRefId}
+                        <p className="font-semibold">{usageTypeLabel(usage)}</p>
+                        <Link className="mt-1 block break-words text-primary hover:underline" href={usageLink(usage)}>
+                          {usageTitle(usage)}
                         </Link>
+                        {usage.usageType === "FINISHED_WORK" && usage.finishedWorkPlatform ? (
+                          <p className="mt-1 text-muted-foreground">平台：{usage.finishedWorkPlatform}</p>
+                        ) : null}
                       </div>
                       <p className="text-muted-foreground">{toLocalDateTime(usage.createdAt)}</p>
                     </div>
@@ -419,6 +425,22 @@ function getDetailActionItems(material: MaterialDto, actions: MaterialActions): 
     { label: "下载", icon: Download, href: `/api/materials/${material.id}/download` },
     actions.trash ? { label: "删除", icon: Trash2, onSelect: () => actions.trash?.(material), tone: "danger" } : null
   ].filter(Boolean) as ActionMenuItem[];
+}
+
+function usageTypeLabel(usage: MaterialUsageDto) {
+  if (usage.usageType === "PACKAGE") return "精选包";
+  if (usage.usageType === "FINISHED_WORK") return "成片/交付件";
+  return usage.usageType;
+}
+
+function usageTitle(usage: MaterialUsageDto) {
+  if (usage.usageType === "FINISHED_WORK") return usage.finishedWorkTitle || usage.usageRefLabel || usage.usageRefId;
+  return usage.packageName || usage.usageRefLabel || usage.usageRefId;
+}
+
+function usageLink(usage: MaterialUsageDto) {
+  if (usage.usageType === "FINISHED_WORK") return `/admin/finished-works/${encodeURIComponent(usage.usageRefId)}`;
+  return `/admin/packages/${encodeURIComponent(usage.usageRefId)}`;
 }
 
 function Info({ label, value }: { label: string; value: string }) {

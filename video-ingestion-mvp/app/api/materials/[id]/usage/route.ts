@@ -21,15 +21,22 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     orderBy: { createdAt: "desc" }
   });
   const packageIds = usages.filter((usage) => usage.usageType === "PACKAGE").map((usage) => usage.usageRefId);
+  const finishedWorkIds = usages.filter((usage) => usage.usageType === "FINISHED_WORK").map((usage) => usage.usageRefId);
   const packages = packageIds.length
     ? await prisma.materialPackage.findMany({
       where: { packageId: { in: packageIds } }
     })
     : [];
+  const finishedWorks = finishedWorkIds.length
+    ? await prisma.finishedWork.findMany({
+      where: { workId: { in: finishedWorkIds } }
+    })
+    : [];
   const packageById = new Map(packages.map((pkg) => [pkg.packageId, pkg]));
+  const finishedWorkById = new Map(finishedWorks.map((work) => [work.workId, work]));
 
   return NextResponse.json({
     materialId: material.materialId,
-    usages: usages.map((usage) => toUsageDto(usage, packageById))
+    usages: usages.map((usage) => toUsageDto(usage, packageById, finishedWorkById))
   });
 }
