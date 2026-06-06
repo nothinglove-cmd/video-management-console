@@ -59,7 +59,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           ],
           include: { material: true }
         },
-        _count: { select: { items: true } }
+        finishedWorks: {
+          orderBy: { updatedAt: "desc" }
+        },
+        _count: { select: { items: true, finishedWorks: true } }
       }
     });
 
@@ -88,15 +91,18 @@ async function findPackage(id: string) {
       ],
       NOT: { status: "DELETED" }
     },
-    include: {
-      items: {
-        orderBy: [
-          { sortOrder: "asc" },
-          { createdAt: "asc" }
-        ],
-        include: { material: true }
+      include: {
+        items: {
+          orderBy: [
+            { sortOrder: "asc" },
+            { createdAt: "asc" }
+          ],
+          include: { material: true }
+        },
+      finishedWorks: {
+        orderBy: { updatedAt: "desc" }
       },
-      _count: { select: { items: true } }
+      _count: { select: { items: true, finishedWorks: true } }
     }
   });
 }

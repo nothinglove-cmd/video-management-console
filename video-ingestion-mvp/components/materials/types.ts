@@ -109,6 +109,10 @@ export type MaterialDto = {
   needsHumanReview: boolean;
   status: string;
   notes?: string | null;
+  usageCount?: number;
+  packageUsageCount?: number;
+  finishedWorkUsageCount?: number;
+  usageState?: "unused" | "packaged_only" | "used_in_finished_work" | "reused" | "all";
   createdAt: string;
   updatedAt?: string;
   operationLogs?: OperationLogDto[];

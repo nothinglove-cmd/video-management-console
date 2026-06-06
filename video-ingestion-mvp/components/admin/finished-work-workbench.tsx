@@ -35,6 +35,15 @@ type FinishedWorkListItemDto = {
   status: FinishedWorkStatus;
   packageId?: string | null;
   packageName?: string | null;
+  publishTitle?: string | null;
+  publishUrl?: string | null;
+  publishedAt?: string | null;
+  accountName?: string | null;
+  projectName?: string | null;
+  versionName?: string | null;
+  coverMaterialId?: string | null;
+  deliveryNotes?: string | null;
+  isPublished: boolean;
   notes?: string | null;
   createdByName?: string | null;
   createdAt: string;
@@ -105,7 +114,30 @@ export function FinishedWorkWorkbench({ initialWorkId }: { initialWorkId?: strin
   const [detailLoading, setDetailLoading] = useState(false);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
-  const [form, setForm] = useState({ title: "", platform: "", purpose: "", packageId: "", notes: "" });
+  const [form, setForm] = useState({
+    title: "",
+    platform: "",
+    purpose: "",
+    projectName: "",
+    accountName: "",
+    versionName: "",
+    publishTitle: "",
+    publishUrl: "",
+    publishedAt: "",
+    packageId: "",
+    notes: ""
+  });
+  const [publishForm, setPublishForm] = useState({
+    projectName: "",
+    accountName: "",
+    versionName: "",
+    publishTitle: "",
+    publishUrl: "",
+    publishedAt: "",
+    coverMaterialId: "",
+    deliveryNotes: "",
+    notes: ""
+  });
   const metrics = useMemo(() => buildMetrics(works), [works]);
 
   useEffect(() => {
@@ -164,6 +196,17 @@ export function FinishedWorkWorkbench({ initialWorkId }: { initialWorkId?: strin
     }
     setActiveWorkId(data.finishedWork.workId);
     setDetail(data.finishedWork);
+    setPublishForm({
+      projectName: data.finishedWork.projectName || "",
+      accountName: data.finishedWork.accountName || "",
+      versionName: data.finishedWork.versionName || "",
+      publishTitle: data.finishedWork.publishTitle || "",
+      publishUrl: data.finishedWork.publishUrl || "",
+      publishedAt: toDateTimeLocalValue(data.finishedWork.publishedAt),
+      coverMaterialId: data.finishedWork.coverMaterialId || "",
+      deliveryNotes: data.finishedWork.deliveryNotes || "",
+      notes: data.finishedWork.notes || ""
+    });
   }
 
   async function createWork() {
@@ -187,14 +230,26 @@ export function FinishedWorkWorkbench({ initialWorkId }: { initialWorkId?: strin
       setMessage(data?.error || "创建成片记录失败。");
       return;
     }
-    setForm({ title: "", platform: "", purpose: "", packageId: "", notes: "" });
+    setForm({
+      title: "",
+      platform: "",
+      purpose: "",
+      projectName: "",
+      accountName: "",
+      versionName: "",
+      publishTitle: "",
+      publishUrl: "",
+      publishedAt: "",
+      packageId: "",
+      notes: ""
+    });
     setActiveWorkId(data.finishedWork.workId);
     setMessage(`已创建成片记录：${data.finishedWork.title}`);
     await loadWorks();
     await openWork(data.finishedWork.workId, true);
   }
 
-  async function patchWork(payload: Partial<Pick<FinishedWorkDetailDto, "title" | "platform" | "purpose" | "notes" | "status" | "packageId">>) {
+  async function patchWork(payload: Partial<Pick<FinishedWorkDetailDto, "title" | "platform" | "purpose" | "notes" | "status" | "packageId" | "publishTitle" | "publishUrl" | "publishedAt" | "accountName" | "projectName" | "versionName" | "coverMaterialId" | "deliveryNotes">>) {
     if (!detail) return;
     setBusy("patch");
     const response = await fetch(`/api/finished-works/${encodeURIComponent(detail.workId)}`, {
@@ -211,6 +266,13 @@ export function FinishedWorkWorkbench({ initialWorkId }: { initialWorkId?: strin
     setDetail(data.finishedWork);
     setMessage("成片记录已更新。");
     await loadWorks();
+  }
+
+  async function savePublishInfo() {
+    await patchWork({
+      ...publishForm,
+      publishedAt: publishForm.publishedAt || null
+    });
   }
 
   async function importPackageMaterials() {
@@ -298,6 +360,14 @@ export function FinishedWorkWorkbench({ initialWorkId }: { initialWorkId?: strin
           <Input value={form.title} placeholder="标题，例如：6 月直播间主推成片 A" onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} />
           <Input value={form.platform} placeholder="平台，例如：抖音 / 视频号 / 客户交付" onChange={(event) => setForm((current) => ({ ...current, platform: event.target.value }))} />
           <Input value={form.purpose} placeholder="用途，例如：投放测试 / 客户复盘 / 发布版本" onChange={(event) => setForm((current) => ({ ...current, purpose: event.target.value }))} />
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Input value={form.projectName} placeholder="项目" onChange={(event) => setForm((current) => ({ ...current, projectName: event.target.value }))} />
+            <Input value={form.accountName} placeholder="账号 / 客户" onChange={(event) => setForm((current) => ({ ...current, accountName: event.target.value }))} />
+            <Input value={form.versionName} placeholder="版本，例如 V1" onChange={(event) => setForm((current) => ({ ...current, versionName: event.target.value }))} />
+          </div>
+          <Input value={form.publishTitle} placeholder="发布标题" onChange={(event) => setForm((current) => ({ ...current, publishTitle: event.target.value }))} />
+          <Input value={form.publishUrl} placeholder="发布链接" onChange={(event) => setForm((current) => ({ ...current, publishUrl: event.target.value }))} />
+          <Input type="datetime-local" value={form.publishedAt} onChange={(event) => setForm((current) => ({ ...current, publishedAt: event.target.value }))} />
           <Select value={form.packageId} onChange={(event) => setForm((current) => ({ ...current, packageId: event.target.value }))}>
             <option value="">不关联精选包</option>
             {packages.map((pkg) => (
@@ -356,11 +426,11 @@ export function FinishedWorkWorkbench({ initialWorkId }: { initialWorkId?: strin
                   </div>
                   <StatusPill tone={finishedWorkStatusTone(work.status)}>{finishedWorkStatusLabel(work.status)}</StatusPill>
                 </div>
-                <p className={cn("mt-2 line-clamp-2 text-muted-foreground", skin.typography.meta)}>{work.purpose || work.platform || work.notes || "未填写用途"}</p>
+                <p className={cn("mt-2 line-clamp-2 text-muted-foreground", skin.typography.meta)}>{[work.platform, work.projectName, work.accountName, work.versionName].filter(Boolean).join(" / ") || work.purpose || "未填写用途"}</p>
                 <div className={cn("mt-3 flex flex-wrap gap-2 text-muted-foreground", skin.typography.meta)}>
                   <span>{work.materialCount} 个素材</span>
                   <span>{formatBytes(work.totalSize)}</span>
-                  <span>{toLocalDateTime(work.updatedAt)}</span>
+                  <span>{work.isPublished ? `已发布 ${work.publishedAt ? toLocalDateTime(work.publishedAt) : ""}` : "未发布"}</span>
                 </div>
               </button>
             ))}
@@ -379,9 +449,10 @@ export function FinishedWorkWorkbench({ initialWorkId }: { initialWorkId?: strin
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className={cn("break-words", skin.typography.panelTitle)}>{detail.title}</h2>
                   <StatusPill tone={finishedWorkStatusTone(detail.status)} withDot>{finishedWorkStatusLabel(detail.status)}</StatusPill>
+                  <StatusPill tone={detail.isPublished ? "success" : "neutral"} withDot>{detail.isPublished ? "已发布" : "未发布"}</StatusPill>
                   <p className={skin.textDensity.id}>{detail.workId}</p>
                 </div>
-                <p className={cn("mt-1 text-muted-foreground", skin.typography.bodyDense)}>{[detail.platform, detail.purpose].filter(Boolean).join(" / ") || "未填写平台和用途"}</p>
+                <p className={cn("mt-1 text-muted-foreground", skin.typography.bodyDense)}>{[detail.platform, detail.projectName, detail.accountName, detail.versionName, detail.purpose].filter(Boolean).join(" / ") || "未填写平台和用途"}</p>
                 {detail.package ? (
                   <Link className={cn("mt-1 inline-block text-primary hover:underline", skin.typography.meta)} href={`/admin/packages/${encodeURIComponent(detail.package.packageId)}`}>
                     来源精选包：{detail.package.name}
@@ -414,6 +485,29 @@ export function FinishedWorkWorkbench({ initialWorkId }: { initialWorkId?: strin
               <Metric label="素材大小" value={formatBytes(detail.totalSize)} helper="原文件大小合计" />
               <Metric label="创建人" value={detail.createdByName || "-"} helper={toLocalDateTime(detail.createdAt)} />
             </div>
+
+            <Surface tone="raised" padding="sm">
+              <div className="grid gap-2 lg:grid-cols-4">
+                <Input value={publishForm.projectName} placeholder="项目" onChange={(event) => setPublishForm((current) => ({ ...current, projectName: event.target.value }))} />
+                <Input value={publishForm.accountName} placeholder="账号 / 客户" onChange={(event) => setPublishForm((current) => ({ ...current, accountName: event.target.value }))} />
+                <Input value={publishForm.versionName} placeholder="版本" onChange={(event) => setPublishForm((current) => ({ ...current, versionName: event.target.value }))} />
+                <Input value={publishForm.coverMaterialId} placeholder="封面素材 ID" onChange={(event) => setPublishForm((current) => ({ ...current, coverMaterialId: event.target.value }))} />
+                <Input className="lg:col-span-2" value={publishForm.publishTitle} placeholder="发布标题" onChange={(event) => setPublishForm((current) => ({ ...current, publishTitle: event.target.value }))} />
+                <Input className="lg:col-span-2" value={publishForm.publishUrl} placeholder="发布链接" onChange={(event) => setPublishForm((current) => ({ ...current, publishUrl: event.target.value }))} />
+                <Input type="datetime-local" value={publishForm.publishedAt} onChange={(event) => setPublishForm((current) => ({ ...current, publishedAt: event.target.value }))} />
+                <Input className="lg:col-span-3" value={publishForm.deliveryNotes} placeholder="交付/发布备注" onChange={(event) => setPublishForm((current) => ({ ...current, deliveryNotes: event.target.value }))} />
+                <Textarea className="lg:col-span-4" value={publishForm.notes} placeholder="内部备注" onChange={(event) => setPublishForm((current) => ({ ...current, notes: event.target.value }))} />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button size="sm" disabled={busy === "patch"} onClick={savePublishInfo}>保存发布信息</Button>
+                {detail.publishUrl ? (
+                  <Button asChild variant="secondary" size="sm">
+                    <a href={detail.publishUrl} target="_blank" rel="noreferrer">打开发布链接</a>
+                  </Button>
+                ) : null}
+                <span className={cn("text-muted-foreground", skin.typography.meta)}>{detail.publishTitle || "未填写发布标题"}</span>
+              </div>
+            </Surface>
 
             {detail.materials.length ? (
               <ResponsiveTableShell className="max-w-full">
@@ -522,4 +616,12 @@ function finishedWorkRoleLabel(role: FinishedWorkRole) {
   if (role === "COVER") return "封面";
   if (role === "AUDIO") return "音频";
   return "其他";
+}
+
+function toDateTimeLocalValue(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (input: number) => String(input).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }

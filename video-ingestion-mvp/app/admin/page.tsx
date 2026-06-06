@@ -69,6 +69,11 @@ export default async function AdminDashboardPage() {
     lowConfidence,
     failed,
     trashed,
+    packageCount,
+    finishedWorkCount,
+    publishedWorkCount,
+    unusedMaterialCount,
+    packagedOnlyMaterialCount,
     recentMaterials
   ] = await Promise.all([
     prisma.material.count({ where: { createdAt: { gte: today } } }),
@@ -78,6 +83,31 @@ export default async function AdminDashboardPage() {
     prisma.material.count({ where: { aiConfidence: { lt: 0.6 }, NOT: { status: "TRASHED" } } }),
     prisma.material.count({ where: { status: "FAILED" } }),
     prisma.material.count({ where: { status: "TRASHED" } }),
+    prisma.materialPackage.count({ where: { NOT: { status: "DELETED" } } }),
+    prisma.finishedWork.count(),
+    prisma.finishedWork.count({
+      where: {
+        OR: [
+          { publishedAt: { not: null } },
+          { publishUrl: { not: null } }
+        ]
+      }
+    }),
+    prisma.material.count({
+      where: {
+        NOT: { status: "TRASHED" },
+        usages: { none: {} }
+      }
+    }),
+    prisma.material.count({
+      where: {
+        NOT: { status: "TRASHED" },
+        AND: [
+          { usages: { some: { usageType: "PACKAGE" } } },
+          { usages: { none: { usageType: "FINISHED_WORK" } } }
+        ]
+      }
+    }),
     prisma.material.findMany({
       where: { NOT: { status: "TRASHED" } },
       orderBy: { createdAt: "desc" },
@@ -112,6 +142,14 @@ export default async function AdminDashboardPage() {
         <MetricCard label={`低置信度${terms.material.singular}`} value={lowConfidence} icon={AlertTriangle} tone="warning" />
         <MetricCard label={`失败${terms.material.singular}`} value={failed} icon={Archive} tone="danger" />
         <MetricCard label={terms.trash.noun} value={trashed} icon={Recycle} tone="neutral" />
+      </section>
+
+      <section className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        <MetricCard label="精选包" value={packageCount} icon={FolderKanban} tone="info" />
+        <MetricCard label="成片记录" value={finishedWorkCount} icon={Archive} tone="processing" />
+        <MetricCard label="已发布成片" value={publishedWorkCount} icon={CheckCircle2} tone="success" />
+        <MetricCard label="未使用素材" value={unusedMaterialCount} icon={AlertTriangle} tone="warning" />
+        <MetricCard label="只进包未成片" value={packagedOnlyMaterialCount} icon={Clock3} tone="review" />
       </section>
 
       <section className="mt-4" style={skin.vars}>

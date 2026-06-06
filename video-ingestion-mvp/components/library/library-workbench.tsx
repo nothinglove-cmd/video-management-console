@@ -121,6 +121,15 @@ const DATE_OPTIONS = [
   ["30D", "近 30 天"]
 ];
 
+const USAGE_STATE_OPTIONS = [
+  ["ALL", "全部使用状态"],
+  ["unused", "未使用"],
+  ["packaged", "已进精选包"],
+  ["used_in_finished_work", "已用于成片"],
+  ["packaged_only", "只进包未成片"],
+  ["reused", "多次使用"]
+];
+
 export function LibraryWorkbench() {
   const [payload, setPayload] = useState<ApiPayload>({ materials: [], categories: [] });
   const [categories, setCategories] = useState<CategoryNodeDto[]>([]);
@@ -138,6 +147,7 @@ export function LibraryWorkbench() {
   const [dateRange, setDateRange] = useState("ALL");
   const [confidence, setConfidence] = useState("ALL");
   const [issue, setIssue] = useState("ALL");
+  const [usageState, setUsageState] = useState("ALL");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [view, setView] = useState<ViewMode>("medium");
   const [page, setPage] = useState(1);
@@ -169,11 +179,11 @@ export function LibraryWorkbench() {
       });
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [submittedQuery, status, uploader, dateRange, confidence, issue, categoryPrefix, selection.type, page, pageSize]);
+  }, [submittedQuery, status, uploader, dateRange, confidence, issue, usageState, categoryPrefix, selection.type, page, pageSize]);
 
   useEffect(() => {
     setSelectedIds([]);
-  }, [submittedQuery, status, uploader, dateRange, confidence, issue, categoryPrefix, selection.type, page, pageSize]);
+  }, [submittedQuery, status, uploader, dateRange, confidence, issue, usageState, categoryPrefix, selection.type, page, pageSize]);
 
   useEffect(() => {
     if (!activeMaterial) return;
@@ -222,6 +232,7 @@ export function LibraryWorkbench() {
     }
     if (confidence === "LOW") params.set("confidenceMax", "0.6");
     if (issue !== "ALL") params.set("issue", issue);
+    if (usageState !== "ALL") params.set("usageState", usageState);
 
     const response = await fetch(`/api/materials?${params.toString()}`, { cache: "no-store" });
     const data = await response.json().catch(() => null) as (ApiPayload & { error?: string }) | null;
@@ -262,6 +273,7 @@ export function LibraryWorkbench() {
     setDateRange("ALL");
     setConfidence("ALL");
     setIssue("ALL");
+    setUsageState("ALL");
     setSelection({ type: "all", label: terms.library.all });
     setPage(1);
   }
@@ -430,6 +442,7 @@ export function LibraryWorkbench() {
           dateRange={dateRange}
           confidence={confidence}
           issue={issue}
+          usageState={usageState}
           uploaders={uploaders}
           view={view}
           advancedOpen={advancedOpen}
@@ -458,6 +471,10 @@ export function LibraryWorkbench() {
             setIssue(value);
             setPage(1);
           }}
+          onUsageStateChange={(value) => {
+            setUsageState(value);
+            setPage(1);
+          }}
           onAdvancedToggle={() => setAdvancedOpen((current) => !current)}
           onViewChange={setView}
           onRefresh={refresh}
@@ -474,7 +491,7 @@ export function LibraryWorkbench() {
           <LibraryEmptyState
             selection={selection}
             hasQuery={Boolean(submittedQuery.trim())}
-            hasFilters={hasActiveLibraryFilters(status, uploader, dateRange, confidence, issue)}
+            hasFilters={hasActiveLibraryFilters(status, uploader, dateRange, confidence, issue, usageState)}
           />
         ) : null}
 
@@ -868,6 +885,7 @@ function LibraryToolbar(props: {
   dateRange: string;
   confidence: string;
   issue: string;
+  usageState: string;
   uploaders: string[];
   view: ViewMode;
   advancedOpen: boolean;
@@ -881,6 +899,7 @@ function LibraryToolbar(props: {
   onDateRangeChange: (value: string) => void;
   onConfidenceChange: (value: string) => void;
   onIssueChange: (value: string) => void;
+  onUsageStateChange: (value: string) => void;
   onAdvancedToggle: () => void;
   onViewChange: (value: ViewMode) => void;
   onRefresh: () => void;
@@ -891,7 +910,8 @@ function LibraryToolbar(props: {
     props.uploader !== "ALL",
     props.dateRange !== "ALL",
     props.confidence !== "ALL",
-    props.issue !== "ALL"
+    props.issue !== "ALL",
+    props.usageState !== "ALL"
   ].filter(Boolean).length;
 
   return (
@@ -930,7 +950,7 @@ function LibraryToolbar(props: {
         </div>
       </div>
       {props.advancedOpen ? (
-        <div className="grid gap-2 border-t border-[color:var(--skin-border-subtle)] pt-3 sm:grid-cols-[minmax(0,11rem)_minmax(0,12rem)_auto]">
+        <div className="grid gap-2 border-t border-[color:var(--skin-border-subtle)] pt-3 sm:grid-cols-[minmax(0,11rem)_minmax(0,12rem)_minmax(0,12rem)_auto]">
           <Select className="h-[var(--skin-control-height-md)] w-full" value={props.confidence} onChange={(event) => props.onConfidenceChange(event.target.value)}>
             <option value="ALL">全部置信度</option>
             <option value="HIGH">高置信度</option>
@@ -940,6 +960,9 @@ function LibraryToolbar(props: {
           <Select className="h-[var(--skin-control-height-md)] w-full" value={props.issue} onChange={(event) => props.onIssueChange(event.target.value)}>
             <option value="ALL">全部问题状态</option>
             {MATERIAL_ISSUE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </Select>
+          <Select className="h-[var(--skin-control-height-md)] w-full" value={props.usageState} onChange={(event) => props.onUsageStateChange(event.target.value)}>
+            {USAGE_STATE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </Select>
           <Button className="min-h-[var(--skin-control-height-md)]" variant="secondary" size="sm" onClick={props.onReset}>
             <X className="mr-1 h-3.5 w-3.5" /> 清空筛选
@@ -1084,6 +1107,7 @@ function LibraryMaterialCard({
           <StatusPill tone={materialStatusTone(material.status)} className={compact ? "px-1.5 py-0" : undefined}>{materialStatusLabel(material.status)}</StatusPill>
           {!compact ? <StatusPill tone="neutral" className="max-w-full truncate">{shortCategory(material.primaryCategory)}</StatusPill> : null}
           {!compact ? <StatusPill tone="neutral">{material.shooterName || material.uploaderName || "未填写"}</StatusPill> : null}
+          {!compact ? <StatusPill tone={usageStateTone(material)}>{usageStateSummary(material)}</StatusPill> : null}
           <ConfidenceBadge value={material.aiConfidence} className="px-1.5 py-0" />
         </div>
         <MaterialIssueBadges material={material} limit={compact ? 2 : 3} className="mt-2" badgeClassName={compact ? "px-1.5 py-0" : undefined} />
@@ -1163,6 +1187,7 @@ function LibraryTable(props: {
             <th className="px-3 py-2 text-left">文件名</th>
             <th className="px-3 py-2 text-left">{terms.category.singular}</th>
             <th className="px-3 py-2 text-left">{terms.shooter.singular}</th>
+            <th className="px-3 py-2 text-left">使用</th>
             <th className="px-3 py-2 text-left">问题</th>
             <th className="px-3 py-2 text-left">置信度</th>
             <th className="px-3 py-2 text-left">状态</th>
@@ -1188,6 +1213,7 @@ function LibraryTable(props: {
               <td className="max-w-[300px] px-3 py-2"><button type="button" className={cn("line-clamp-2 text-left hover:text-primary", skin.textDensity.tableFileName)} onClick={() => props.onOpen(material)}>{material.storedFileName}</button></td>
               <td className={cn("max-w-[180px] truncate px-3 py-2", skin.textDensity.technical)}>{material.primaryCategory}</td>
               <td className={cn("whitespace-nowrap px-3 py-2", skin.textDensity.technical)}>{material.shooterName || material.uploaderName || "-"}</td>
+              <td className="px-3 py-2"><StatusPill tone={usageStateTone(material)}>{usageStateSummary(material)}</StatusPill></td>
               <td className="min-w-[160px] px-3 py-2"><MaterialIssueBadges material={material} limit={3} /></td>
               <td className="px-3 py-2"><ConfidenceBadge value={material.aiConfidence} /></td>
               <td className="px-3 py-2"><StatusPill tone={materialStatusTone(material.status)}>{materialStatusLabel(material.status)}</StatusPill></td>
@@ -1581,8 +1607,8 @@ function downloadFileName(contentDisposition: string | null, fallback: string) {
   }
 }
 
-function hasActiveLibraryFilters(status: string, uploader: string, dateRange: string, confidence: string, issue: string) {
-  return status !== "ALL" || uploader !== "ALL" || dateRange !== "ALL" || confidence !== "ALL" || issue !== "ALL";
+function hasActiveLibraryFilters(status: string, uploader: string, dateRange: string, confidence: string, issue: string, usageState: string) {
+  return status !== "ALL" || uploader !== "ALL" || dateRange !== "ALL" || confidence !== "ALL" || issue !== "ALL" || usageState !== "ALL";
 }
 
 function materialStatusTone(status: string) {
@@ -1603,6 +1629,22 @@ function materialStatusLabel(status: string) {
   if (status === "FAILED") return "失败";
   if (status === "TRASHED") return "回收站";
   return status;
+}
+
+function usageStateTone(material: MaterialDto): "neutral" | "success" | "processing" | "info" {
+  if (!material.usageCount) return "neutral";
+  if ((material.finishedWorkUsageCount || 0) > 0) return "success";
+  if ((material.packageUsageCount || 0) > 0) return "processing";
+  return "info";
+}
+
+function usageStateSummary(material: MaterialDto) {
+  const packageCount = material.packageUsageCount || 0;
+  const finishedCount = material.finishedWorkUsageCount || 0;
+  if (!packageCount && !finishedCount) return "未使用";
+  if (packageCount && finishedCount) return `包 ${packageCount} / 成片 ${finishedCount}`;
+  if (finishedCount) return `成片 ${finishedCount}`;
+  return `精选包 ${packageCount}`;
 }
 
 function shortCategory(category?: string | null) {

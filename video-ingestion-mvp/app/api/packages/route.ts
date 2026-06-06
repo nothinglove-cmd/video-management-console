@@ -43,7 +43,7 @@ export async function GET(request: Request) {
         include: { material: true }
       },
       _count: {
-        select: { items: true }
+        select: { items: true, finishedWorks: true }
       }
     }
   });
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
         },
         include: {
           items: { include: { material: true } },
-          _count: { select: { items: true } }
+          _count: { select: { items: true, finishedWorks: true } }
         }
       });
       return NextResponse.json({ package: toPackageListDto(created) }, { status: 201 });

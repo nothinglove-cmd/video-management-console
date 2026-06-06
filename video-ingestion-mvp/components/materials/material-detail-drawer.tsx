@@ -43,6 +43,12 @@ type MaterialUsageDto = {
   finishedWorkTitle?: string | null;
   finishedWorkStatus?: string | null;
   finishedWorkPlatform?: string | null;
+  finishedWorkPublishTitle?: string | null;
+  finishedWorkPublishUrl?: string | null;
+  finishedWorkPublishedAt?: string | null;
+  finishedWorkAccountName?: string | null;
+  finishedWorkProjectName?: string | null;
+  finishedWorkVersionName?: string | null;
   notes?: string | null;
   createdByName?: string | null;
   createdAt: string;
@@ -334,6 +340,16 @@ export function MaterialDetailDrawer({
                         </Link>
                         {usage.usageType === "FINISHED_WORK" && usage.finishedWorkPlatform ? (
                           <p className="mt-1 text-muted-foreground">平台：{usage.finishedWorkPlatform}</p>
+                        ) : null}
+                        {usage.usageType === "FINISHED_WORK" ? (
+                          <p className="mt-1 text-muted-foreground">
+                            {[usage.finishedWorkProjectName, usage.finishedWorkAccountName, usage.finishedWorkVersionName].filter(Boolean).join(" / ") || "未记录项目和账号"}
+                          </p>
+                        ) : null}
+                        {usage.usageType === "FINISHED_WORK" && usage.finishedWorkPublishUrl ? (
+                          <a className="mt-1 block break-words text-primary hover:underline" href={usage.finishedWorkPublishUrl} target="_blank" rel="noreferrer">
+                            {usage.finishedWorkPublishTitle || usage.finishedWorkPublishUrl}
+                          </a>
                         ) : null}
                       </div>
                       <p className="text-muted-foreground">{toLocalDateTime(usage.createdAt)}</p>

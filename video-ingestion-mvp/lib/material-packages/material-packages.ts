@@ -4,7 +4,12 @@ import type { FinishedWork, Material, MaterialPackage, MaterialPackageItem, Mate
 import { byteSizeToSafeNumber } from "@/lib/serialization/bigint-json";
 
 type PackageItemWithMaterial = MaterialPackageItem & { material: Material };
-type PackageWithItems = MaterialPackage & { items: PackageItemWithMaterial[]; _count?: { items: number } };
+type PackageFinishedWork = Pick<FinishedWork, "id" | "workId" | "title" | "status" | "platform" | "publishTitle" | "publishUrl" | "publishedAt" | "accountName" | "projectName" | "versionName">;
+type PackageWithItems = MaterialPackage & {
+  items: PackageItemWithMaterial[];
+  finishedWorks?: PackageFinishedWork[];
+  _count?: { items: number; finishedWorks?: number };
+};
 type UsageWithMaterial = MaterialUsage & { material?: Material | null };
 
 export function generateMaterialPackageId(date = new Date()) {
@@ -31,6 +36,7 @@ export function toPackageListDto(pkg: PackageWithItems) {
     createdAt: pkg.createdAt.toISOString(),
     updatedAt: pkg.updatedAt.toISOString(),
     itemCount,
+    finishedWorkCount: pkg._count?.finishedWorks ?? pkg.finishedWorks?.length ?? 0,
     totalSize: sumPackageSize(pkg.items)
   };
 }
@@ -49,7 +55,21 @@ export function toPackageDetailDto(pkg: PackageWithItems) {
         notes: item.notes,
         createdAt: item.createdAt.toISOString(),
         material: toPackageMaterialDto(item.material)
-      }))
+      })),
+    finishedWorks: (pkg.finishedWorks || []).map((work) => ({
+      id: work.id,
+      workId: work.workId,
+      title: work.title,
+      status: work.status,
+      platform: work.platform,
+      publishTitle: work.publishTitle,
+      publishUrl: work.publishUrl,
+      publishedAt: work.publishedAt?.toISOString() ?? null,
+      accountName: work.accountName,
+      projectName: work.projectName,
+      versionName: work.versionName,
+      isPublished: Boolean(work.publishedAt || work.publishUrl)
+    }))
   };
 }
 
@@ -95,6 +115,12 @@ export function toUsageDto(
     finishedWorkTitle: work?.title || usage.usageRefLabel || usage.usageRefId,
     finishedWorkStatus: work?.status,
     finishedWorkPlatform: work?.platform,
+    finishedWorkPublishTitle: work?.publishTitle,
+    finishedWorkPublishUrl: work?.publishUrl,
+    finishedWorkPublishedAt: work?.publishedAt?.toISOString() ?? null,
+    finishedWorkAccountName: work?.accountName,
+    finishedWorkProjectName: work?.projectName,
+    finishedWorkVersionName: work?.versionName,
     notes: usage.notes,
     createdByName: usage.createdByName,
     createdAt: usage.createdAt.toISOString()

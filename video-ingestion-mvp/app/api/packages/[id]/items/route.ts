@@ -120,7 +120,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           ],
           include: { material: true }
         },
-        _count: { select: { items: true } }
+        finishedWorks: {
+          orderBy: { updatedAt: "desc" }
+        },
+        _count: { select: { items: true, finishedWorks: true } }
       }
     });
 

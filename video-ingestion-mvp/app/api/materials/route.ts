@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 
 import { isAdminUser, requireApiUser } from "@/app/api/_utils";
 
@@ -50,8 +51,10 @@ export async function GET(request: Request) {
       categoryIds: await getCategorySubtreeIds(url.searchParams.get("categoryId")),
       issue: url.searchParams.get("issue")
     };
-    const where = buildMaterialWhere(searchParams);
-    const facetWhere = buildMaterialWhere({ ...searchParams, shooter: null });
+    const usageState = normalizeUsageState(url.searchParams.get("usageState"));
+    const usageWhere = await buildUsageStateWhere(usageState);
+    const where = andWhere(buildMaterialWhere(searchParams), usageWhere);
+    const facetWhere = andWhere(buildMaterialWhere({ ...searchParams, shooter: null }), usageWhere);
     const page = clampInt(url.searchParams.get("page"), 1, 100000, 1);
     const pageSize = clampInt(url.searchParams.get("pageSize"), 1, 144, 48);
     const skip = (page - 1) * pageSize;
@@ -154,12 +157,25 @@ export async function GET(request: Request) {
         take: 1000
       })
     ]);
+    const usageCountByMaterialId = await countUsagesForMaterials(materials.map((material) => material.materialId));
+    const enrichedMaterials = materials.map((material) => {
+      const usageCount = usageCountByMaterialId.get(material.materialId) || {
+        usageCount: 0,
+        packageUsageCount: 0,
+        finishedWorkUsageCount: 0
+      };
+      return {
+        ...material,
+        ...usageCount,
+        usageState: deriveMaterialUsageState(usageCount)
+      };
+    });
     const uploaders = Array.from(
       new Set(uploaderRows.map((item) => item.shooterName || item.uploaderName).filter((item): item is string => Boolean(item)))
     ).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
 
     return NextResponse.json(toJsonSafe({
-      materials,
+      materials: enrichedMaterials,
       categories: getAllSelectableCategories(),
       assetTypeLabels: ASSET_TYPE_LABELS,
       facets: { uploaders },
@@ -177,6 +193,86 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
+}
+
+type UsageState = "all" | "unused" | "packaged" | "used_in_finished_work" | "packaged_only" | "reused";
+
+function normalizeUsageState(value: string | null): UsageState {
+  if (
+    value === "unused" ||
+    value === "packaged" ||
+    value === "used_in_finished_work" ||
+    value === "packaged_only" ||
+    value === "reused"
+  ) {
+    return value;
+  }
+  return "all";
+}
+
+async function buildUsageStateWhere(usageState: UsageState): Promise<Prisma.MaterialWhereInput | null> {
+  if (usageState === "all") return null;
+  if (usageState === "unused") return { usages: { none: {} } };
+  if (usageState === "packaged") return { usages: { some: { usageType: "PACKAGE" } } };
+  if (usageState === "used_in_finished_work") return { usages: { some: { usageType: "FINISHED_WORK" } } };
+  if (usageState === "packaged_only") {
+    return {
+      AND: [
+        { usages: { some: { usageType: "PACKAGE" } } },
+        { usages: { none: { usageType: "FINISHED_WORK" } } }
+      ]
+    };
+  }
+
+  const usageRows = await prisma.$queryRaw<Array<{ materialId: string }>>`
+    SELECT "materialId"
+    FROM "MaterialUsage"
+    GROUP BY "materialId"
+    HAVING COUNT(*) > 1
+  `;
+  const reusedMaterialIds = usageRows.map((row) => row.materialId);
+  return { materialId: { in: reusedMaterialIds } };
+}
+
+function andWhere(...items: Array<Prisma.MaterialWhereInput | null | undefined>): Prisma.MaterialWhereInput {
+  const filters = items.filter((item): item is Prisma.MaterialWhereInput => {
+    if (!item || typeof item !== "object") return false;
+    return Object.keys(item).length > 0;
+  });
+  if (filters.length === 0) return {};
+  if (filters.length === 1) return filters[0];
+  return { AND: filters };
+}
+
+async function countUsagesForMaterials(materialIds: string[]) {
+  const empty = new Map<string, { usageCount: number; packageUsageCount: number; finishedWorkUsageCount: number }>();
+  if (!materialIds.length) return empty;
+  const rows = await prisma.materialUsage.groupBy({
+    by: ["materialId", "usageType"],
+    where: { materialId: { in: materialIds } },
+    _count: { _all: true }
+  });
+  const result = new Map<string, { usageCount: number; packageUsageCount: number; finishedWorkUsageCount: number }>();
+  for (const materialId of materialIds) {
+    result.set(materialId, { usageCount: 0, packageUsageCount: 0, finishedWorkUsageCount: 0 });
+  }
+  for (const row of rows) {
+    const counts = result.get(row.materialId) || { usageCount: 0, packageUsageCount: 0, finishedWorkUsageCount: 0 };
+    const count = row._count._all;
+    counts.usageCount += count;
+    if (row.usageType === "PACKAGE") counts.packageUsageCount += count;
+    if (row.usageType === "FINISHED_WORK") counts.finishedWorkUsageCount += count;
+    result.set(row.materialId, counts);
+  }
+  return result;
+}
+
+function deriveMaterialUsageState(counts: { usageCount: number; packageUsageCount: number; finishedWorkUsageCount: number }) {
+  if (counts.usageCount === 0) return "unused";
+  if (counts.usageCount > 1 || counts.finishedWorkUsageCount > 1) return "reused";
+  if (counts.finishedWorkUsageCount > 0) return "used_in_finished_work";
+  if (counts.packageUsageCount > 0) return "packaged_only";
+  return "all";
 }
 
 function safeUserStatus(status: string | null) {

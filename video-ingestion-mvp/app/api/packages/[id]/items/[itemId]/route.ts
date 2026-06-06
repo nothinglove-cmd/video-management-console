@@ -57,7 +57,10 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
           ],
           include: { material: true }
         },
-        _count: { select: { items: true } }
+        finishedWorks: {
+          orderBy: { updatedAt: "desc" }
+        },
+        _count: { select: { items: true, finishedWorks: true } }
       }
     });
 

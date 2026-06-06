@@ -17,6 +17,14 @@ type UpdateFinishedWorkBody = {
   purpose?: string | null;
   status?: string;
   packageId?: string | null;
+  publishTitle?: string | null;
+  publishUrl?: string | null;
+  publishedAt?: string | null;
+  accountName?: string | null;
+  projectName?: string | null;
+  versionName?: string | null;
+  coverMaterialId?: string | null;
+  deliveryNotes?: string | null;
   notes?: string | null;
 };
 
@@ -48,6 +56,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (nextTitle) data.title = nextTitle;
   if (body.platform !== undefined) data.platform = cleanNullableText(body.platform, 80);
   if (body.purpose !== undefined) data.purpose = cleanNullableText(body.purpose, 160);
+  if (body.publishTitle !== undefined) data.publishTitle = cleanNullableText(body.publishTitle, 160);
+  if (body.publishUrl !== undefined) data.publishUrl = cleanNullableText(body.publishUrl, 500);
+  if (body.publishedAt !== undefined) {
+    const publishedAt = parseNullableDate(body.publishedAt);
+    if (body.publishedAt && !publishedAt) return jsonError("发布时间格式无效。");
+    data.publishedAt = publishedAt;
+  }
+  if (body.accountName !== undefined) data.accountName = cleanNullableText(body.accountName, 120);
+  if (body.projectName !== undefined) data.projectName = cleanNullableText(body.projectName, 120);
+  if (body.versionName !== undefined) data.versionName = cleanNullableText(body.versionName, 80);
+  if (body.coverMaterialId !== undefined) data.coverMaterialId = cleanNullableText(body.coverMaterialId, 80);
+  if (body.deliveryNotes !== undefined) data.deliveryNotes = cleanNullableText(body.deliveryNotes, 1000);
   if (body.notes !== undefined) data.notes = cleanNullableText(body.notes, 1000);
   if (status) data.status = status;
   if (body.packageId !== undefined) {
@@ -131,4 +151,11 @@ function cleanNullableText(value: unknown, maxLength: number) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, maxLength) : null;
+}
+
+function parseNullableDate(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }

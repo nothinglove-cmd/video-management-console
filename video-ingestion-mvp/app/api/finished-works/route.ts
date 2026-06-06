@@ -17,6 +17,14 @@ type CreateFinishedWorkBody = {
   purpose?: string | null;
   status?: string;
   packageId?: string | null;
+  publishTitle?: string | null;
+  publishUrl?: string | null;
+  publishedAt?: string | null;
+  accountName?: string | null;
+  projectName?: string | null;
+  versionName?: string | null;
+  coverMaterialId?: string | null;
+  deliveryNotes?: string | null;
   notes?: string | null;
 };
 
@@ -39,6 +47,11 @@ export async function GET(request: Request) {
           { title: { contains: q } },
           { platform: { contains: q } },
           { purpose: { contains: q } },
+          { publishTitle: { contains: q } },
+          { publishUrl: { contains: q } },
+          { accountName: { contains: q } },
+          { projectName: { contains: q } },
+          { versionName: { contains: q } },
           { notes: { contains: q } }
         ]
       } : {})
@@ -71,6 +84,8 @@ export async function POST(request: Request) {
   if (!status) return jsonError("成片状态无效。");
   const pkg = body.packageId ? await findPackage(body.packageId) : null;
   if (body.packageId && !pkg) return jsonError("关联精选包不存在。", 404);
+  const publishedAt = parseNullableDate(body.publishedAt);
+  if (body.publishedAt && !publishedAt) return jsonError("发布时间格式无效。");
 
   const data = {
     workspaceId: pkg?.workspaceId ?? undefined,
@@ -79,6 +94,14 @@ export async function POST(request: Request) {
     purpose: cleanNullableText(body.purpose, 160),
     status,
     packageId: pkg?.packageId,
+    publishTitle: cleanNullableText(body.publishTitle, 160),
+    publishUrl: cleanNullableText(body.publishUrl, 500),
+    publishedAt,
+    accountName: cleanNullableText(body.accountName, 120),
+    projectName: cleanNullableText(body.projectName, 120),
+    versionName: cleanNullableText(body.versionName, 80),
+    coverMaterialId: cleanNullableText(body.coverMaterialId, 80),
+    deliveryNotes: cleanNullableText(body.deliveryNotes, 1000),
     notes: cleanNullableText(body.notes, 1000),
     createdByName: authOperatorName(auth.user)
   };
@@ -128,6 +151,13 @@ function cleanNullableText(value: unknown, maxLength: number) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, maxLength) : null;
+}
+
+function parseNullableDate(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function isUniqueWorkIdError(error: unknown) {

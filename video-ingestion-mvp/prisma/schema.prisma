@@ -634,6 +634,14 @@ model FinishedWork {
   status        FinishedWorkStatus @default(DRAFT)
   packageId     String?
   package       MaterialPackage?   @relation(fields: [packageId], references: [packageId])
+  publishTitle  String?
+  publishUrl    String?
+  publishedAt   DateTime?
+  accountName   String?
+  projectName   String?
+  versionName   String?
+  coverMaterialId String?
+  deliveryNotes String?
   notes         String?
   createdByName String?
   createdAt     DateTime           @default(now())
@@ -643,6 +651,9 @@ model FinishedWork {
   @@index([workspaceId])
   @@index([packageId])
   @@index([status])
+  @@index([publishedAt])
+  @@index([projectName])
+  @@index([accountName])
   @@index([createdAt])
 }
 

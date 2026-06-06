@@ -29,6 +29,7 @@ type PackageListItemDto = {
   createdAt: string;
   updatedAt: string;
   itemCount: number;
+  finishedWorkCount?: number;
   totalSize: number;
 };
 
@@ -61,6 +62,20 @@ type PackageItemDto = {
 
 type PackageDetailDto = PackageListItemDto & {
   items: PackageItemDto[];
+  finishedWorks: Array<{
+    id: string;
+    workId: string;
+    title: string;
+    status: string;
+    platform?: string | null;
+    publishTitle?: string | null;
+    publishUrl?: string | null;
+    publishedAt?: string | null;
+    accountName?: string | null;
+    projectName?: string | null;
+    versionName?: string | null;
+    isPublished: boolean;
+  }>;
 };
 
 const STATUS_OPTIONS = [
@@ -337,8 +352,44 @@ export function MaterialPackageWorkbench({ initialPackageId }: { initialPackageI
             <div className="grid gap-2 md:grid-cols-3">
               <Metric label="素材数" value={String(detail.itemCount)} helper="PackageItem" />
               <Metric label="包大小" value={formatBytes(detail.totalSize)} helper="原文件大小合计" />
-              <Metric label="创建人" value={detail.createdByName || "-"} helper={toLocalDateTime(detail.createdAt)} />
+              <Metric label="转成片" value={String(detail.finishedWorks.length)} helper="关联成片/交付件" />
             </div>
+
+            {detail.finishedWorks.length ? (
+              <Surface tone="raised" padding="sm">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className={skin.typography.panelTitle}>关联成片</p>
+                  <p className={cn("text-muted-foreground", skin.typography.meta)}>这个精选包已进入以下成片/交付件</p>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {detail.finishedWorks.map((work) => (
+                    <div key={work.workId} className="rounded-[var(--skin-radius-card)] border border-[color:var(--skin-border)] bg-[color:var(--skin-panel-bg)] p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <Link className={cn("font-semibold text-primary hover:underline", skin.typography.bodyDense)} href={`/admin/finished-works/${encodeURIComponent(work.workId)}`}>
+                          {work.title}
+                        </Link>
+                        <StatusPill tone={finishedWorkStatusTone(work.status, work.isPublished)}>{work.isPublished ? "已发布" : finishedWorkStatusLabel(work.status)}</StatusPill>
+                      </div>
+                      <p className={cn("mt-1 text-muted-foreground", skin.typography.meta)}>
+                        {[work.platform, work.projectName, work.accountName, work.versionName].filter(Boolean).join(" / ") || "未填写发布信息"}
+                      </p>
+                      <p className={cn("mt-1 text-muted-foreground", skin.typography.meta)}>
+                        {work.publishedAt ? toLocalDateTime(work.publishedAt) : "未记录发布时间"}
+                      </p>
+                      {work.publishUrl ? (
+                        <a className={cn("mt-1 block truncate text-primary hover:underline", skin.typography.meta)} href={work.publishUrl} target="_blank" rel="noreferrer">
+                          {work.publishTitle || work.publishUrl}
+                        </a>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </Surface>
+            ) : (
+              <Surface tone="muted" padding="sm" className={cn(skin.typography.meta, "text-muted-foreground")}>
+                暂无成片/交付件关联这个精选包。
+              </Surface>
+            )}
 
             {detail.items.length ? (
               <ResponsiveTableShell className="max-w-full">
@@ -431,4 +482,20 @@ function packageStatusLabel(status: PackageStatus) {
   if (status === "ACTIVE") return "使用中";
   if (status === "ARCHIVED") return "已归档";
   return "已删除";
+}
+
+function finishedWorkStatusLabel(status: string) {
+  if (status === "DRAFT") return "草稿";
+  if (status === "IN_PROGRESS") return "制作中";
+  if (status === "DELIVERED") return "已交付";
+  if (status === "PUBLISHED") return "已发布";
+  if (status === "ARCHIVED") return "已归档";
+  return status;
+}
+
+function finishedWorkStatusTone(status: string, published: boolean): SkinStatusTone {
+  if (published || status === "PUBLISHED" || status === "DELIVERED") return "success";
+  if (status === "IN_PROGRESS") return "processing";
+  if (status === "ARCHIVED") return "neutral";
+  return "review";
 }
